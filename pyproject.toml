@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61", "setuptools_scm[toml]>=7"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banff-aid"
+version = "0.1.0"
+description = "BANFF-AID: Banff Automated Nephrology Feature Framework - Artificial Intelligence Diagnosis"
+readme = "readme.md"
+license = {file = "license.txt"}
+authors = [
+    { name = "Dženan Zukić", email = "dzenan.zukic@kitware.com" },
+]
+keywords = [
+    "banff", "AI", "diagnosis", "kidney", "transplant"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy==1.26.4",
+    "monai[tensorboard,itk,tqdm,openslide,pandas,matplotlib]==1.4.0",
+]
+
+[project.scripts]
+train = "train:main"
+
+[tool.black]
+line-length = 120  # Default 88 is a bit too short.
+target-version = ['py311']
