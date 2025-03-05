@@ -29,14 +29,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "numpy==1.26.4",
-    "monai[tensorboard,itk,tqdm,openslide,pandas,matplotlib]==1.4.0",
+    "monai[tensorboard,itk,tqdm,openslide,pandas,matplotlib,openslide]==1.4.0",
 ]
 
 [project.scripts]
 train = "train:main"
+
+[tool.setuptools.packages.find]
+exclude = ["logs","training"]
 
 [tool.black]
 line-length = 120  # Default 88 is a bit too short.
