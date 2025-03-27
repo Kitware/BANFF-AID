@@ -34,11 +34,14 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "numpy==1.26.4",
-    "monai[tensorboard,itk,tqdm,openslide,pandas,matplotlib,openslide]==1.4.0",
+    "Pillow>=9.0.1",
+    "girder-client==3.2.8",
+    "reportlab==4.4.0",
+    "scipy==1.15.2",
+    "svglib==1.5.1",
 ]
-
-[project.scripts]
-train = "train:main"
+[project.urls]
+"Repository" = "https://github.com/Kitware/BANFF-AID"
 
 [tool.setuptools.packages.find]
 exclude = ["logs","training"]
