@@ -13,12 +13,11 @@ BANFF-AID is a plugin for automated nephropathology diagnosis, built on the open
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/Kitware/BANFF-AID.git
-   cd BANFF-AID/banff-aid
    ```
 
 2. **Build Docker Image:**
    ```bash
-   docker build -t BANFF-AID/banff-aid .
+   docker build -f banff-aid/Dockerfile -t BANFF-AID/banff-aid .
    ```
 
 ### Integration with DSA
