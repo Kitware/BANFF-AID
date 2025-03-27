@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>Quantification</category>
+  <title>BANFF-AID</title>
+  <description>Computes Banff lesion scores for a given renal WSI</description>
+  <version>0.0.1</version>
+  <documentation-url>https://digitalslidearchive.github.io/HistomicsTK/</documentation-url>
+  <license>Apache 2.0</license>
+  <contributor>Austin Allen (Kitware)</contributor>
+  <acknowledgements>This work is part of the BANFF-AID project.</acknowledgements>
+  <parameters>  
+    <label>IO</label>
+    <description>Input/output parameters</description>
+    <directory reference="_girder_id_" defaultRelativePath="..">
+      <name>results_folder</name>
+      <label>Output Folder</label>
+      <description>Folder in which to save results</description>
+      <channel>input</channel>
+      <longflag>results-folder</longflag>
+    </directory>
+    <image reference="_girder_id_" defaultRelativePath="..">
+      <name>image_id</name>
+      <label>Input Image</label>
+      <channel>input</channel>
+      <longflag>image-id</longflag> 
+      <description>Path to slide image with annotations</description>
+    </image> 
+  </parameters>
+  
+  <parameters advanced="true">
+    <description>Input/output parameters</description>
+    <label>Girder API URL</label>
+    <string>
+      <name>girder_api_url</name>
+      <longflag>api-url</longflag>
+      <label>Girder API URL</label>
+      <description>A Girder API URL</description>
+      <default>http://girder:8080/api/v1</default>
+    </string>
+  </parameters>
+
+  <parameters advanced="true">
+    <label>Annotation Names</label>
+    <description>These annotation names are the filenames associated with annotations for the given slide.</description>
+    <string>
+      <name>non_gsg_filename</name>
+      <longflag>non-gsg-name</longflag>
+      <label>Non-Globally Sclerotic Glomeruli</label>
+      <description>Name of the annotation file associated with non-globally sclerotic glomeruli</description>
+      <default>non_globally_sclerotic_glomeruli</default>
+    </string>
+    <string>
+      <name>gsg_filename</name>
+      <longflag>gsg-name</longflag>
+      <label>Globally Sclerotic Glomeruli</label>
+      <description>Name of the annotation file associated with globally sclerotic glomeruli</description>
+      <default>globally_sclerotic_glomeruli</default>
+    </string>
+    <string>
+      <name>tubules_filename</name>
+      <longflag>tubules-name</longflag>
+      <label>Tubules</label>
+      <description>Name of the annotation file associated with tubules</description>
+      <default>tubules</default>
+    </string>
+    <string>
+      <name>arteries_filename</name>
+      <longflag>arteries-name</longflag>
+      <label>Arteries/Arterioles</label>
+      <description>Name of the annotation file associated with arteries and arterioles</description>
+      <default>arteries/arterioles</default>
+    </string>
+    <string>
+      <name>cortical_interstitium_filename</name>
+      <longflag>cortical-interstitium</longflag>
+      <label>Cortical Interstitium</label>
+      <description>Name of the annotation file associated with the cortical interstitium</description>
+      <default>cortical_interstitium</default>
+    </string>
+    <string>
+      <name>medullary_interstitium_filename</name>
+      <longflag>medullary-interstitium</longflag>
+      <label>Medullary Interstitium</label>
+      <description>Name of the annotation file associated with the medullary interstitium</description>
+      <default>medullary_interstitium</default>
+    </string>
+  </parameters>
+
+  <parameters advanced="true">
+    <description>Please provide your account username and password for authentication</description>
+    <label>Username and Password</label>
+    <string>
+      <name>username</name>
+      <longflag>username</longflag>
+      <label>DSA Username</label>
+      <description>Account username to log in</description>
+      <default>admin</default>
+    </string>
+    <string>
+      <name>password</name>
+      <longflag>password</longflag>
+      <label>Password</label>
+      <description>Password associated with your account</description>
+      <default>password</default>
+    </string>
+  </parameters>
+</executable>
