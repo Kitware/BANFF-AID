@@ -1,0 +1,12 @@
+# we do not want to copy git metadata
+.git
+
+# nor PyCharm project files
+.idea
+
+# nor Python virtual environment
+.venv
+.venv9
+
+# nor other binary files
+*.egg-info
