@@ -4,7 +4,7 @@ FROM dsarchive/histomicstk:latest
 LABEL maintainer="Austin Allen <austin.allen@kitware.com>"
 
 # Create a directory for your plugin code
-ENV MY_PLUGIN_PATH=/gs
+ENV MY_PLUGIN_PATH=/combined-lesion-scores
 RUN mkdir -p $MY_PLUGIN_PATH
 WORKDIR $MY_PLUGIN_PATH
 
@@ -26,7 +26,7 @@ RUN python -m slicer_cli_web.cli_list_entrypoint --list_cli
 
 # If you want to see the help of your new CLI
 RUN python -m slicer_cli_web.cli_list_entrypoint \
-        glomerulosclerosis --help
+        BanffAid --help
 
 # For demonstration, let's set the entrypoint to a shell
 # that has your plugin code installed. You can adapt this
