@@ -2,41 +2,24 @@
 
 from setuptools import find_packages, setup
 
-# setup(
-#     name="Glomerulosclerosis",
-#     version="0.1.0",
-#     packages=find_packages(),
-#     install_requires=[
-#         # whatever dependencies
-#         "numpy",
-#         "histomicstk",
-#     ],
-#     entry_points={
-#         "girder_slicer_cli_web": [
-#             # Format: "CLIName = your_package.your_module:yourFunction"
-#             "Glomerulosclerosis = glom.cli:cliDescription"
-#         ],
-#     },
-# )
-
 setup(
-    name="GlomerulosclerosisPlugin",
+    name="BANFF-AID",
     # use_scm_version={'local_scheme': prerelease_local_scheme},
-    description="Glomerulosclerosis Computation",
+    description="Calculating Banff lesion scores",
     long_description_content_type="text/x-rst",
     author="Austin Allen",
     author_email="austin.allen@kitware.com",
     url="https://github.com/adallen93/banff-lesion-scores",
     packages=find_packages(exclude=["tests", "*_test"]),
     package_dir={
-        "banff_lesion_scores": "gs",
+        "BanffAid": "BanffAid",
     },
     include_package_data=True,
     install_requires=[
         # scientific packages
         # 'nimfa>=1.3.2',
-        # 'numpy>=1.21.1',
-        # 'scipy>=0.19.0',
+        "numpy>=1.21.1",
+        # "scipy>=0.19.0",
         # 'Pillow==9.5.0',
         # 'pandas>=0.19.2',
         # 'imageio>=2.3.0',
@@ -63,8 +46,8 @@ setup(
         # 'distributed>=1.21.6',
         # # large image sources
         # 'large-image[sources]',
-        # 'girder-slicer-cli-web',
-        # 'girder-client',
+        "girder-slicer-cli-web",
+        "girder-client",
         # # cli
         # 'ctk-cli',
     ],

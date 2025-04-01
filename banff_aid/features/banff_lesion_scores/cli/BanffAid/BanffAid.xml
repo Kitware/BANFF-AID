@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <executable>
   <category>Banff Lesion Scores</category>
-  <title>Glomerulosclerosis</title>
-  <description>Computes proportion of sclerosed glomeruli.</description>
+  <title>Tubular Atrophy (ct)</title>
+  <description>Computes Banff lesion score ct to assess tubular atrophy</description>
   <version>0.0.1</version>
   <documentation-url>https://digitalslidearchive.github.io/HistomicsTK/</documentation-url>
   <license>Apache 2.0</license>
@@ -11,6 +11,16 @@
   <parameters>  
     <label>IO</label>
     <description>Input/output parameters.</description>
+    <file fileExtensions=".json" reference="inputImageFile">
+      <name>tubules_file</name>
+      <label>Tubules Annotation</label>
+      <description>
+      Annotation related to the tubules (*.json)
+      </description>
+      <channel>input</channel>
+      <index>0</index>
+      <longflag>tubules_file</longflag>
+    </file>
     <file fileExtensions=".json" reference="inputImageFile">
       <name>gsg_file</name>
       <label>Sclerotic Glomeruli Annotation</label>
@@ -21,7 +31,7 @@
       <index>0</index>
       <longflag>gsg_file</longflag>
     </file> 
-      <file fileExtensions=".json" reference="inputImageFile">
+    <file fileExtensions=".json" reference="inputImageFile">
       <name>non_gsg_file</name>
       <label>Non-Sclerotic Glomeruli Annotation</label>
       <description>Annotation related to the non-sclerosed glomeruli (*.json)</description>
