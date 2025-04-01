@@ -4,7 +4,7 @@ FROM dsarchive/histomicstk:latest
 LABEL maintainer="Austin Allen <austin.allen@kitware.com>"
 
 # Create a directory for your plugin code
-ENV MY_PLUGIN_PATH=/banff-lesion-scores
+ENV MY_PLUGIN_PATH=/gs
 RUN mkdir -p $MY_PLUGIN_PATH
 WORKDIR $MY_PLUGIN_PATH
 
