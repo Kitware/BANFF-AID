@@ -1,6 +1,5 @@
 {
-    "cli_list": [
-      "Glomerulosclerosis"
-    ]
+  "glomerulosclerosis": {
+    "type"    : "python"
   }
-  
+}
