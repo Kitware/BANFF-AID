@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>Banff Lesion Scores</category>
+  <title>Tubular Atrophy (ct)</title>
+  <description>Computes Banff lesion score ct to assess tubular atrophy</description>
+  <version>0.0.1</version>
+  <documentation-url>https://digitalslidearchive.github.io/HistomicsTK/</documentation-url>
+  <license>Apache 2.0</license>
+  <contributor>Austin Allen (Kitware)</contributor>
+  <acknowledgements>This work is part of the BANFF-AID project.</acknowledgements>
+  <parameters>  
+    <label>IO</label>
+    <description>Input/output parameters.</description>
+    <directory reference="_girder_id_" defaultRelativePath="..">
+      <name>images</name>
+      <description>The directory of the images to import</description>
+      <label>Image Directory</label>
+      <channel>input</channel>
+      <index>0</index>
+    </directory>
+    <!-- <file fileExtensions=".json" reference="inputImageFile">
+      <name>tubules_file</name>
+      <label>Tubules Annotation</label>
+      <description>
+      Annotation related to the tubules (*.json)
+      </description>
+      <channel>input</channel>
+      <index>0</index>
+      <longflag>tubules_file</longflag>
+    </file>
+    <file fileExtensions=".json" reference="inputImageFile">
+      <name>gsg_file</name>
+      <label>Sclerotic Glomeruli Annotation</label>
+      <description>
+      Annotation related to the sclerosed glomeruli (*.json)
+      </description>
+      <channel>input</channel>
+      <index>0</index>
+      <longflag>gsg_file</longflag>
+    </file> 
+    <file fileExtensions=".json" reference="inputImageFile">
+      <name>non_gsg_file</name>
+      <label>Non-Sclerotic Glomeruli Annotation</label>
+      <description>Annotation related to the non-sclerosed glomeruli (*.json)</description>
+      <channel>input</channel>
+      <longflag>non_gsg_file</longflag>
+    </file>-->
+    <!-- <string> 
+      <name>girdger_api_url</name>
+      <longflag>api-url</longflag>
+      <label>Girder API URL</label>
+      <description>A Girder API URL (e.g., https://girder.example.com:443/api/v1)</description>
+      <default>http://localhost:8080/api/v1</default>
+    </string> -->
+    <string>
+      <name>username</name>
+      <longflag>username</longflag>
+      <label>User ID</label>
+      <description>Please enter your user ID</description>
+      <default>username</default>
+    </string>
+    <string>
+      <name>password</name>
+      <longflag>password</longflag>
+      <label>User Passord</label>
+      <description>Please enter your password</description>
+      <default>password</default>
+    </string> 
+  </parameters>
+</executable>
