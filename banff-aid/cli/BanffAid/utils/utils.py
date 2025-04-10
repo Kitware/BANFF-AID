@@ -5,8 +5,9 @@ import subprocess
 
 import numpy as np
 import scipy.ndimage as ndi
-from girder_client import GirderClient
 from PIL import Image, ImageDraw
+
+# from girder_client import GirderClient
 
 
 def convert_notebook_to_pdf(
@@ -21,10 +22,10 @@ def convert_notebook_to_pdf(
 
 
 def compute_max_distance(points):
-    """Compute the maximum distance of points to an edge.
+    """Compute the maximum distance of points to an edge of a single polygon.
 
     Given a list of points defining a polygon,
-    compute the maximum (signed) distance from an interior point to the edge.
+    compute the maximum distance from an interior point to the edge.
     The distance is computed using cv2.distanceTransform with L2 norm.
     Returns the negative of the maximum distance.
 
@@ -67,168 +68,8 @@ def compute_max_distance(points):
     # The maximum distance from the interior to the edge
     max_distance = dist_transform.max()
 
-    # Return negative value for signed convention (interior is negative)
+    # Return the maximum distance
     return -max_distance
-
-
-def get_items_and_annotations(
-    girder_client: GirderClient,
-    folder_id: int,
-    missing: bool = False,
-):
-    """Retrieve items from a folder along with their matching annotations.
-
-    Args:
-    - girder_client: An instance of GirderClient to communicate with the
-      Girder server.
-    - folder_id: The ID of the folder containing the items.
-    - annotation_name: A string that should be part of the annotation's name.
-    - missing: If False, return items with valid annotations. If True,
-      return items missing valid annotations.
-
-    Returns:
-    - A list of tuples (item, annotation_record, first_element) if missing
-      is False.
-    - A list of items missing a valid annotation if missing is True.
-    """
-    results = []  # Initialize list to hold the results
-
-    # Loop over all items in the specified folder
-    for item in girder_client.listItem(folder_id):
-        # Only process items that have a 'largeImage' property
-        if not item.get("largeImage"):
-            continue
-
-        valid_annotation_found = False
-
-        # Retrieve annotation records for the current item,
-        # sorted by most recent update.
-        annotation_records = girder_client.get(
-            "annotation",
-            parameters={
-                "itemId": item["_id"],
-                "sort": "updated",
-                "sortdir": -1,
-            },
-        )
-
-        # Process each annotation record for the item
-        for annotation_record in annotation_records:
-            # Get the annotation title for easier access
-            annotation_title = annotation_record["annotation"]["name"]
-
-            # Skip annotations that do not contain the desired name, or
-            # that include 'Predictions'
-            if "Predictions" in annotation_title:
-                continue
-
-            # Fetch full annotation details using the annotation record's
-            # ID.
-            annotation_detail = girder_client.get(
-                f"annotation/{annotation_record['_id']}"
-            )
-
-            # Validate that the annotation structure contains 'elements'
-            # and is non-empty.
-            if (
-                "annotation" not in annotation_detail
-                or "elements" not in annotation_detail["annotation"]
-                or not annotation_detail["annotation"]["elements"]
-            ):
-                continue
-
-            # Get the first element from the annotation's elements list
-            first_element = annotation_detail["annotation"]["elements"][0]
-
-            # Check if the element is of type 'pixelmap' and contains a
-            # bounding box.
-            if first_element["type"] != "pixelmap" or not first_element.get(
-                "user", {}
-            ).get("bbox"):
-                continue
-
-            # If not in "missing" mode, append the valid item with
-            # annotation details.
-            if not missing:
-                results.append((item, annotation_record, first_element))
-
-            valid_annotation_found = True
-            break  # Stop checking further annotations for this item.
-
-        # If no valid annotation was found and we're checking for missing
-        # annotations, add the item to the results list.
-        if not valid_annotation_found and missing:
-            results.append(item)
-
-    return results
-
-
-def major_minor_axes(points: list[list[float]]) -> tuple[float, float]:
-    """Computes major and minor axes for an ellipse represented by x, y points.
-
-    Args:
-      tubules (dict[str, Any]):
-        JSON annotations for tubules.
-
-    Returns (tuple[float, float]):
-      Length of major and minor axes of ellipse (format: major, minor)
-    """
-    if len(points) < 2:
-        raise ValueError("At least two points are needed for an ellipse.")
-
-    # Find the pair of points with the maximum Euclidean distance (the major
-    # axis endpoints)
-    max_distance = 0.0
-    major_axis_pair = None
-    n = len(points)
-    for i in range(n):
-        for j in range(i + 1, n):
-            p1 = points[i]
-            p2 = points[j]
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            d = math.hypot(dx, dy)
-            if d > max_distance:
-                max_distance = d
-                major_axis_pair = (p1, p2)
-
-    major_axis = max_distance
-    # Get the endpoints of the major axis
-    (p1, p2) = major_axis_pair
-    x1, y1, x2, y2 = p1[0], p1[1], p2[0], p2[1]
-
-    # Compute the center of the ellipse (midpoint of the major axis)
-    center = ((x1 + x2) / 2, (y1 + y2) / 2)
-
-    # The line through (x1, y1) and (x2, y2) defines the major axis.
-    # We'll compute the perpendicular distance from each point to this line.
-    # The formula for distance from point (x0, y0) to the line through (x1, y1)
-    # and (x2, y2):
-    #   distance = |(y2 - y1)*x0 - (x2 - x1)*y0
-    #              + (x2*y1 - y2*x1)| / sqrt((y2-y1)^2
-    #              + (x2-x1)^2)
-    # Reference: https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
-    denom = math.hypot(x2 - x1, y2 - y1)
-    max_perp_distance = 0.0
-    for p in points:
-        x0, y0 = p[0], p[1]
-        dist = (
-            abs((y2 - y1) * x0 - (x2 - x1) * y0 + (x2 * y1 - y2 * x1)) / denom
-        )
-        if dist > max_perp_distance:
-            max_perp_distance = dist
-            minor_axis_pair = (x0, y0)
-
-    # The maximum perpendicular distance represents the semi-minor axis,
-    # so the full minor axis length is twice that.
-    minor_axis = 2 * max_perp_distance
-
-    return major_axis, minor_axis
-    # return {
-    #     "major_axis": {"points": major_axis_pair, "distance": major_axis},
-    #     "minor_axis": {"points": minor_axis_pair, "distance": minor_axis},
-    #     "center": center
-    # }
 
 
 def print_histogram(numbers_to_print: list[float]) -> None:

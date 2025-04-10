@@ -49,15 +49,8 @@ import json
 from typing import Any
 
 import numpy as np
-from girder_client import GirderClient
 from slicer_cli_web import CLIArgumentParser
-from utils.utils import (
-    compute_max_distance,
-    get_items_and_annotations,
-    major_minor_axes,
-    print_histogram,
-    wilson_interval,
-)
+from utils.utils import compute_max_distance, print_histogram, wilson_interval
 
 #################################
 ## Functions to Compute Scores ##
@@ -109,14 +102,6 @@ def compute_ct(tubules: dict[str, Any]) -> dict[str, Any]:
     Returns (dict[str, Any]):
         Information related to tubule diameters and the ct score.
     """
-    # Implementation:
-    # - Find the major and minor axes for each tubule
-    # - Estimate the diameter (use minor axis for now)
-    # - Calculate the 80th percentile of the diameters
-    # - Calculate the proportion of tubules with a diameter less than 50%
-    #   of the 80% percentile diameter
-    # - Calculate ct score
-    # - Return dictionary with ct score, "normal" diameter, and all diameters
     tubule_elements = tubules["annotation"]["elements"]
     diameters: list[float] = []
     for te in tubule_elements:
@@ -148,7 +133,6 @@ def compute_ct(tubules: dict[str, Any]) -> dict[str, Any]:
         f"{round(np.median(diameters), 1)}, "
         f"{round(np.percentile(diameters, 75), 1)}]"
     )
-    print("Well this is new!")
     print(f"quick: range = {range}")
     return {
         "Tubule Diameters": diameters,
@@ -167,63 +151,50 @@ def compute_ct(tubules: dict[str, Any]) -> dict[str, Any]:
 def run_ci(configs: CLIArgumentParser) -> None:
     """Main."""
     # Load annotations using JSON
-    print("\n\nREPORT FOR INTERSTITIAL FIBROSIS (BANFF LESION SCORE 'ci')\n")
-    print("(No Implementation)\n")
-    print("made it")
-    gc = GirderClient(
-        apiUrl="http://localhost:8080/api/v1"
-        # apiUrl=configs.girdger_api_url
-    ).get("system/version")  # configs.girderApiUrl)
-    print("to here")
-    # gc.authenticate("admin", "password")
-
-    folder = configs.images
-    # stuff = get_items_and_annotations(gc, folder)
-    # for thing in stuff:
-    #     print(thing)
+    print("\n\nREPORT FOR INTERSTITIAL FIBROSIS (BANFF LESION SCORE 'ci')")
+    print("\n(No Implementation)\n")
 
 
 def run_ct(configs: CLIArgumentParser) -> None:
     """Main."""
     print("\n\nREPORT FOR TUBULAR ATROPHY (BANFF LESION SCORE 'ct')\n")
     # Load annotations using JSON
-    # with open(configs.tubules_file) as file:
-    #     tubules = json.load(file)
+    with open(configs.tubules_file) as file:
+        tubules = json.load(file)
 
-    # # Compute ct
-    # ct = compute_ct(tubules)
+    # Compute ct
+    ct = compute_ct(tubules)
 
-    # # Print report
-    # for key, value in ct.items():
-    #     if key != "Tubule Diameters":
-    #         print(f"{key}: {value}")
-    # print_histogram(ct["Tubule Diameters"])
+    # Print report
+    for key, value in ct.items():
+        if key != "Tubule Diameters":
+            print(f"{key}: {value}")
+    print_histogram(ct["Tubule Diameters"])
 
 
 def run_cv(configs: CLIArgumentParser) -> None:
     """Main."""
     # Load annotations using JSON
     print(
-        "\n\nREPORT FOR VASCULAR INTIMAL THICKENING (BANFF LESION SCORE 'cv')\n"
+        "\n\nREPORT FOR VASCULAR INTIMAL THICKENING (BANFF LESION SCORE 'cv')"
     )
-    print("(No Implementation)\n")
+    print("\n(No Implementation)\n")
 
 
 def run_gs(configs: dict[str, str]) -> None:
     """Main."""
     print("\n\nREPORT FOR GLOMERULOSCLEROSIS\n")
     # Load annotations using JSON
-    # with open(configs.non_gsg_file) as file:
-    #     ngsg = json.load(file)
-    # with open(configs.gsg_file) as file:
-    #     gsg = json.load(file)
+    with open(configs.non_gsg_file) as file:
+        ngsg = json.load(file)
+    with open(configs.gsg_file) as file:
+        gsg = json.load(file)
 
-    # # Compute GS
-    # gs = compute_gs(ngsg, gsg)
+    # Compute GS
+    gs = compute_gs(ngsg, gsg)
 
-    # At some point in the future, I will have define the XML in a way that
-    # we can save an actual report that can be downloaded for users. However,
-    # we're not there yet, so I'm just going to print out the results to the
-    # logger
-    # for key, value in gs.items():
-    #     print(f"{key}: {value}")
+    # At some point in the future, we will define the XML in a way that we
+    # can save an actual report that can be downloaded for users. However,
+    # we're not there yet, so we simply print out the results to the logger
+    for key, value in gs.items():
+        print(f"{key}: {value}")
