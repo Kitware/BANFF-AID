@@ -10,9 +10,11 @@ readme = "readme.md"
 license = {file = "license.txt"}
 authors = [
     { name = "Dženan Zukić", email = "dzenan.zukic@kitware.com" },
+    { name = "David Manthey", email = "david.manthey@kitware.com" },
+    { name = "Austin Allen", email = "austin.allen@kitware.com" },
 ]
 keywords = [
-    "banff", "AI", "diagnosis", "kidney", "transplant"
+    "banff", "AI", "diagnosis", "kidney", "transplant", "nephrology", "digital pathology"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
