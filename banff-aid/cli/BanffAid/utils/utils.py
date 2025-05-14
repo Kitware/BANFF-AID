@@ -24,10 +24,72 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndi
 from girder_client import GirderClient
+from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
+from sklearn.neighbors import KDTree
 from slicer_cli_web import CLIArgumentParser
+
+
+def ci_threshold(proportion: float, discrete: bool = True) -> float | int:
+    """Compute a Banff interstitial fibrosis (ci) score from a proportion.
+
+    Depending on the `discrete` flag, returns either a discrete score (0-3)
+    based on fixed cutoffs, or a continuous score (0.0-4.0) by linear
+    interpolation within those bins.
+
+    Args:
+        proportion (float): Fraction of fibrotic tissue (0.0-1.0).
+        discrete (bool): If True, return one of {0, 1, 2, 3}. Otherwise,
+            return a float in [0.0, 4.0).
+
+    Returns:
+        int | float: Discrete integer score if `discrete` is True,
+            else a continuous float score.
+    """
+    if discrete:
+        if proportion < 0.06:
+            return 0
+        elif proportion < 0.26:
+            return 1
+        elif proportion < 0.51:
+            return 2
+        else:
+            return 3
+    else:
+        if proportion < 0.06:
+            return (proportion / 0.06) * 1
+        elif proportion < 0.26:
+            return 1 + ((proportion - 0.06) / (0.26 - 0.06)) * 1
+        elif proportion < 0.51:
+            return 2 + ((proportion - 0.26) / (0.51 - 0.26)) * 1
+        else:
+            return 3 + ((proportion - 0.51) / (1 - 0.51)) * 1
+
+
+def compute_fibrosis_area(edge: float, cutoff: float) -> tuple[float, float]:
+    """Compute normal and fibrotic area from edge length and cutoff.
+
+    Treat each edge as defining a square region. If the edge length exceeds
+    the cutoff, the normal area is the cutoff² and the excess is fibrosis.
+    Otherwise, the entire square is normal and fibrosis is zero.
+
+    Args:
+        edge (float): Edge length of the square region.
+        cutoff (float): Cutoff edge length defining normal tissue.
+
+    Returns:
+        tuple[float, float]: A pair (normal_area, fibrosis_area).
+    """
+    if edge**2 > cutoff**2:
+        normal = cutoff**2
+        fibrosis = edge**2 - cutoff**2
+    else:
+        normal = edge**2
+        fibrosis = 0
+
+    return normal, fibrosis
 
 
 def compute_max_distance(points):
@@ -82,9 +144,48 @@ def compute_max_distance(points):
     return -max_distance
 
 
-def convert_to_microns(
-    points: list[tuple], mpp_x: float, mpp_y: float
-) -> list[tuple]:
+def compute_polygon_centroid(polygon: list[list[float]]) -> tuple[float, float]:
+    """Compute the centroid of a 2D polygon via the shoelace method.
+
+    Calculates centroid coordinates (cx, cy) for a closed polygon defined by
+    a sequence of (x, y) points. If the computed area is zero (e.g., colinear
+    or insufficient points), returns the average of the input coordinates.
+
+    Args:
+        polygon (list[list[float]]): List of [x, y] pairs defining the polygon.
+
+    Returns:
+        tuple[float, float]: Centroid coordinates (cx, cy).
+    """
+    x = np.asarray([p[0] for p in polygon])
+    y = np.asarray([p[1] for p in polygon])
+    # Compute area using the shoelace method (1/2 sum(xi yi+1))
+    area = 0.5 * (np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+    # If area = 0, that typically means that either the points are on a single line or
+    # there are too few points to calculate area. If this is the case, we define the
+    # centroid as the average of the x and y values.
+    if not area:
+        # Another edge case that **shouldn't** be a problem with JSON annotations is
+        # if the length of the points is a single point. While this shouldn't happen
+        # with closed points, we account for its possibility here.
+        if len(polygon) < 2:
+            return x[0], y[0]
+        else:
+            return np.mean(x[:-1]), np.mean(y[:-1])
+
+    # Compute centroid x and y coordinates
+    cross = x * np.roll(y, -1) - np.roll(x, -1) * y
+    # Note: Our inputs points don't have the constraint of being CCW, which means
+    # it's possible (and likely) to get a negative value when it should be positive.
+    # The absolute value is what we're after
+    cx = np.abs((1 / (6 * area)) * np.sum((x + np.roll(x, -1)) * cross))
+    cy = np.abs((1 / (6 * area)) * np.sum((y + np.roll(y, -1)) * cross))
+
+    return cx, cy
+
+
+def convert_to_microns(points: list[tuple], mpp_x: float, mpp_y: float) -> list[tuple]:
     """Convert annotation points from pixel units to micron units.
 
     This function scales a list of (x, y) or (x, y, z) coordinate tuples
@@ -103,6 +204,79 @@ def convert_to_microns(
     points_in_microns = [(p[0] * mpp_x, p[1] * mpp_y) for p in points]
 
     return points_in_microns
+
+
+def create_histogram(
+    x: list[float],
+    title: str = None,
+    xlab: str = None,
+    ylab: str = None,
+    vline: float = None,
+    linelab: str = None,
+) -> Figure:
+    """Create a matplotlib histogram with an optional vertical reference line.
+
+    Converts the input data to a NumPy array, builds a square (3"×3") figure,
+    and plots a histogram with a sensible default bin count. If `vline` is
+    provided, draws a dashed vertical line annotated by `linelab`.
+
+    Args:
+        x (list[float]): Data values to histogram.
+        title (str, optional): Plot title. Defaults to None.
+        xlab (str, optional): X-axis label. Defaults to None.
+        ylab (str, optional): Y-axis label. Defaults to None.
+        vline (float, optional): X-coordinate at which to draw a vertical line.
+            Defaults to None.
+        linelab (str, optional): Label for the vertical line in the legend.
+            Defaults to None.
+
+    Returns:
+        matplotlib.figure.Figure: The figure containing the histogram.
+    """
+    # Convert to array and compute median
+    x = np.array(x)
+
+    # Set up a “pretty” style (you can try 'seaborn-darkgrid', 'ggplot', etc.)
+    # plt.style.use("seaborn-darkgrid")
+
+    # Create the figure and axis
+    fig, ax = plt.subplots(figsize=(3, 3))
+
+    # Histogram
+    n, bins, patches = ax.hist(
+        x,
+        bins=min(30, max(len(x) // 3, 5)),
+        color="#4C72B0",
+        edgecolor="white",
+        alpha=0.9,
+    )
+    if vline:
+        ax.axvline(
+            vline,
+            color="#DD8452",  # contrasting line color
+            linestyle="--",
+            linewidth=2,
+            label=f"{linelab} = {vline:.2f}",
+        )
+
+    # Titles and labels
+    if title:
+        ax.set_title(title, fontsize=13, fontweight="bold")
+    if xlab:
+        ax.set_xlabel(xlab, fontsize=12)
+    if ylab:
+        ax.set_ylabel(ylab, fontsize=12)
+
+    # Legend
+    ax.legend(fontsize=12, frameon=True)
+
+    # Tweak tick params for readability
+    ax.tick_params(axis="both", which="major", labelsize=12)
+
+    # Tight layout so labels don’t get cut off
+    plt.tight_layout()
+
+    return fig
 
 
 def create_table(
@@ -340,7 +514,7 @@ def draw_table(
         mask="auto",
     )
 
-    return pdf_canvas, y
+    return pdf_canvas, y - 28
 
 
 def draw_new_page(
@@ -363,7 +537,7 @@ def draw_new_page(
     return pdf_canvas, y
 
 
-def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> Any:
+def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> dict[str, Any]:
     """Fetch annotation data from Girder for a given image and expected labels.
 
     This function resolves the image item ID from a provided file ID,
@@ -409,14 +583,11 @@ def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> Any:
     for ann_name in annotation_names:
         # Girder allows multiple annotations of the same name to be attached to
         # a single image. We want to raise an exception if this occurs.
-        matching_anns = [
-            ann for ann in annotations if ann["annotation"]["name"] == ann_name
-        ]
+        matching_anns = [ann for ann in annotations if ann["annotation"]["name"] == ann_name]
 
         if len(matching_anns) > 1:
             raise ValueError(
-                f"Multiple annotations named '{ann_name}' found on item "
-                f"{item_id}. Please ensure names are unique."
+                f"Multiple annotations named '{ann_name}' found on item " f"{item_id}. Please ensure names are unique."
             )
 
         # If there are no matching annotations, that's okay. We just need to
@@ -434,9 +605,7 @@ def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> Any:
     return annotation_data
 
 
-def fetch_mpp(
-    gc: GirderClient, image_id: int, default_mpp: float = 0.25
-) -> tuple[float, float]:
+def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tuple[float, float]:
     """Fetch microns-per-pixel (MPP) resolution from Girder metadata.
 
     This function retrieves the MPP values in the x and y directions from
@@ -462,6 +631,108 @@ def fetch_mpp(
     return mpp_x, mpp_y
 
 
+def get_boundaries(element: dict):
+    """Gets the min and max for x and y values."""
+    x = [p[0] for p in element["points"]]
+    y = [p[1] for p in element["points"]]
+    return min(x), max(x), min(y), max(y)
+
+
+def k_nearest_polygons(cortex: list[dict[str, Any]], k: int = 6) -> list[dict[str, Any]]:
+    """Find k-nearest neighbor polygons for each cortex section.
+
+    Builds a KDTree of polygon centroids in each section, queries up to k
+    closest neighbors for each polygon, computes the minimum positive edge
+    distance to those neighbors, and stores it as 'nearest edge'.
+
+    Args:
+        cortex (list[dict[str, Any]]): List of cortex sections, each with a
+            "structures" key containing polygons with "centroid" and "points".
+        k (int): Number of nearest neighbors to query per polygon.
+
+    Returns:
+        list[dict[str, Any]]: The input cortex list with each structure dict
+            augmented by a "nearest edge" key.
+    """
+    for ctx_section in cortex:
+        # Retrieve all centroids from the structures within this section of cortex.
+        # We also want the points for investigating the nearest edges of the nearest
+        # structures
+        centroids = [polygon["centroid"] for polygon in ctx_section["structures"]]
+        combined_points = [polygon["points"] for polygon in ctx_section["structures"]]
+
+        if not centroids:
+            # We can't do anything if there are no structures in this cortex
+            continue
+
+        # Create a KDTree of all centroids (using default leaf_size=40)
+        centroid_tree = KDTree(centroids)
+
+        # We need to handle the case that there are fewer than k neighbors for this
+        # section of cortex. If this is the case, we want to consider all structures
+        # as the "nearest neighbors"
+        n_available = len(centroids)
+        k_eff = min(k, n_available)
+
+        # Add KNN centroids to each polygon
+        for polygon in ctx_section["structures"]:
+            distance, index = centroid_tree.query([polygon["centroid"]], k=k_eff)
+            # These next two lines help in the case that k_eff = 1
+            distance = np.atleast_2d(distance)[0]
+            index = np.atleast_2d(index)[0]
+            nearest_structures = [combined_points[idx] for idx in index]
+
+            nearest_edges = []
+            for points in nearest_structures:
+                edge = nearest_edge(polygon["points"], points)
+                if edge > 0:
+                    # We only want to consider edges that are greater than 0
+                    # (i.e., not overlapping)
+                    nearest_edges.append(edge)
+
+            polygon["nearest edge"] = min(nearest_edges) if nearest_edges else 0
+
+    return cortex
+
+
+def nearest_edge(polygon_a: dict[str, Any], polygon_b: list[list[float]], k: int = 6) -> float:
+    """Compute the minimum distance between two polygon boundaries.
+
+    Builds KD-trees on each polygon's vertices, queries up to k nearest
+    points to the opposing polygon's centroid, then returns the smallest
+    Euclidean distance among all those neighbor pairs.
+
+    Args:
+        polygon_a (list[list[float]]): [[x, y], …] vertices of the first polygon.
+        polygon_b (list[list[float]]): [[x, y], …] vertices of the second polygon.
+        k (int): Max number of nearest vertices to consider on each polygon.
+
+    Returns:
+        float: Minimum edge distance between the two polygons.
+    """
+    # We will only be using 2D points, so we need to reshape our data
+    tree_a = KDTree(np.array(polygon_a)[:, :2])
+    tree_b = KDTree(np.array(polygon_b)[:, :2])
+
+    # We want to first find the nearest vertices to our
+    centroid_a = compute_polygon_centroid(polygon_a)
+    centroid_b = compute_polygon_centroid(polygon_b)
+
+    # Query tree A and tree B with the minimum of k and the size of the respective
+    # polygon
+    ka = min(k, len(polygon_a))
+    kb = min(k, len(polygon_b))
+    _, ia = tree_a.query([centroid_b], k=ka)
+    _, ib = tree_b.query([centroid_a], k=kb)
+
+    # Looping over both sets of nearest points is k^2 time, which is a constant
+    nearest_a = [polygon_a[idx] for idx in ia[0]]
+    nearest_b = [polygon_b[idx] for idx in ib[0]]
+    edges: list[float] = [np.linalg.norm(np.array(pa) - np.array(pb)) for pa in nearest_a for pb in nearest_b]
+
+    return min(edges)
+
+
 def wilson_interval(k: int, n: int) -> tuple[float, float]:
     """Compute the 95% Wilson score confidence interval for a binomial proportion.
 
@@ -483,9 +754,7 @@ def wilson_interval(k: int, n: int) -> tuple[float, float]:
         https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval
     """
     if n == 0:
-        raise ValueError(
-            "Total number of trials (n) must be greater than zero."
-        )
+        raise ValueError("Total number of trials (n) must be greater than zero.")
 
     # Compute the sample proportion.
     p_hat = k / n
@@ -507,3 +776,38 @@ def wilson_interval(k: int, n: int) -> tuple[float, float]:
     upper_bound = (center_adjusted + adjustment) / denominator
 
     return lower_bound, upper_bound
+
+
+def within_boundaries(element: dict, box: tuple) -> bool:
+    """Check if a polygon overlaps a rectangular boundary.
+
+    Validates that `box` is (xmin, xmax, ymin, ymax), then returns True
+    if any vertex in `element['points']` lies within or overlaps it.
+
+    Args:
+        element (dict): Annotation with 'points': list of [x, y] pairs.
+        box (tuple): Boundaries as (xmin, xmax, ymin, ymax).
+
+    Returns:
+        bool: True if the polygon overlaps the box, else False.
+
+    Raises:
+        ValueError: If `box` does not have 4 items or is misordered.
+    """
+    # Validate box boundaries
+    if len(box) != 4:
+        raise ValueError("4 items required for boundaries: xmin, xmax, ymin, ymax")
+    elif box[0] > box[1] or box[2] > box[3]:
+        raise ValueError("Expected boundaries in order of xmin, xmax, ymin, ymax")
+
+    # Extract x and y values of the element
+    element_x = [p[0] for p in element["points"]]
+    element_y = [p[1] for p in element["points"]]
+    return (
+        # How loose should we be with this restriction? As it stands, this is including
+        # any polygon that overlaps at all with the cortical interstitium
+        max(element_x) > box[0]
+        and min(element_x) < box[1]
+        and max(element_y) > box[2]
+        and min(element_y) < box[3]
+    )
