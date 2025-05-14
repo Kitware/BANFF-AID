@@ -9,9 +9,6 @@ allograft status and monitor progression of chronic injury.
 Reference:
     For details on the Banff classification and scoring criteria, consult
     the Banff Working Group publications and relevant nephropathology guidelines.
-
-Author:
-    Austin Allen, Kitware, Inc., 2025
 """
 
 from banff_lesion_score.banff_lesion_score import BanffLesionScore

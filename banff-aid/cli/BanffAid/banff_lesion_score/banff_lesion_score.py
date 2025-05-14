@@ -24,15 +24,22 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
 from slicer_cli_web import CLIArgumentParser
 from utils.utils import (
+    ci_threshold,
     compute_max_distance,
+    compute_fibrosis_area,
+    compute_polygon_centroid,
     convert_to_microns,
+    create_histogram,
     create_table,
     draw_plot,
     draw_table,
     draw_text,
     fetch_annotations,
     fetch_mpp,
+    get_boundaries,
+    k_nearest_polygons,
     wilson_interval,
+    within_boundaries,
 )
 
 
@@ -86,24 +93,171 @@ class BanffLesionScore:
         self.gsg_annotation = annotations[args.gsg_filename]
         self.tubules_annotation = annotations[args.tubules_filename]
         self.arteries_annotation = annotations[args.arteries_filename]
-        self.cortical_interstitium_annotation = annotations[
-            args.cortical_interstitium_filename
-        ]
-        self.medullary_interstitium_annotation = annotations[
-            args.medullary_interstitium_filename
-        ]
+        self.cortical_interstitium_annotation = annotations[args.cortical_interstitium_filename]
+        self.medullary_interstitium_annotation = annotations[args.medullary_interstitium_filename]
 
-    def compute_ci(self) -> None:
-        """Compute the interstitial fibrosis (ci) Banff lesion score.
+    def cortex_structures(self, boundary: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+        """Extract annotated structures overlapping a cortex region.
 
-        This method is a placeholder for future implementation. It is expected to
-        analyze cortical interstitial regions and calculate the extent of fibrosis
-        based on annotation data.
+        Iterates through artery, globally sclerotic glomerulus, non-sclerotic glomerulus,
+        and tubule annotations, selects those whose polygons overlap `boundary`, computes
+        centroids, assigns a type and unique index, and returns them.
+
+        Args:
+            boundary (tuple[float, float, float, float]): (xmin, xmax, ymin, ymax)
+                defining the cortical region.
 
         Returns:
-            None
+            list[dict[str, Any]]: Each dict contains keys:
+                - "points": list of [x, y] vertices
+                - "centroid": (x, y) tuple
+                - "type": str lesion type
+                - "index": int unique identifier
         """
-        return ["No implementation."]
+        ctx_structures = []
+        idx = 0
+        # Add arteries
+        for structure in self.arteries_annotation["annotation"]["elements"]:
+            if within_boundaries(structure, boundary):
+                polygon: dict[str, Any] = {}
+                polygon["points"] = structure["points"]
+                polygon["centroid"] = compute_polygon_centroid(structure["points"])
+                polygon["type"] = "artery/arteriole"
+                polygon["index"] = idx
+                ctx_structures.append(polygon)
+                idx += 1
+
+        # Add globally sclerotic glomeruli
+        for structure in self.gsg_annotation["annotation"]["elements"]:
+            if within_boundaries(structure, boundary):
+                polygon: dict[str, Any] = {}
+                polygon["points"] = structure["points"]
+                polygon["centroid"] = compute_polygon_centroid(structure["points"])
+                polygon["type"] = "globally sclerotic glomerulus"
+                polygon["index"] = idx
+                ctx_structures.append(polygon)
+                idx += 1
+
+        # Add non-globally sclerotic glomeruli
+        for structure in self.non_gsg_annotation["annotation"]["elements"]:
+            if within_boundaries(structure, boundary):
+                polygon: dict[str, Any] = {}
+                polygon["points"] = structure["points"]
+                polygon["centroid"] = compute_polygon_centroid(structure["points"])
+                polygon["type"] = "non-globally sclerotic glomerulus"
+                polygon["index"] = idx
+                ctx_structures.append(polygon)
+                idx += 1
+
+        # Add tubules
+        for structure in self.tubules_annotation["annotation"]["elements"]:
+            if within_boundaries(structure, boundary):
+                polygon: dict[str, Any] = {}
+                polygon["points"] = structure["points"]
+                polygon["centroid"] = compute_polygon_centroid(structure["points"])
+                polygon["type"] = "tubule"
+                polygon["index"] = idx
+                ctx_structures.append(polygon)
+                idx += 1
+
+        return ctx_structures
+
+    def compute_ci(self) -> dict[str, Any]:
+        """Compute interstitial fibrosis (ci) scores for multiple quantiles.
+
+        Processes cortical annotation elements to extract structure edges,
+        prunes duplicates, computes 25th, 50th, and 75th percentile cutoffs,
+        calculates normal and fibrosis areas for each cutoff, and assigns both
+        discrete and continuous ci scores.
+
+        Returns:
+            dict[str, Any]: Dictionary with keys "Q1", "Q2", "Q3" each mapping to
+                a metrics dict (Cutoff, Normal Area, Fibrosis Area,
+                Proportion of Fibrosis, ci Score (Discrete), ci Score (Continuous)),
+                plus "Edge Lengths" listing the pruned edge lengths.
+        """
+        cortex: list[dict[str, Any]] = []
+        for ctx in self.cortical_interstitium_annotation["annotation"]["elements"]:
+            # Identify polygons in cortex
+            ctx_section: dict[str, Any] = {}
+            ctx_section["points"] = ctx["points"]
+            ctx_section["boundary"] = get_boundaries(ctx)
+
+            # Add all structures overlapping the sub-section of the cortex to the set of
+            # structures
+            ctx_section["structures"] = self.cortex_structures(ctx_section["boundary"])
+            cortex.append(ctx_section)
+
+        # Use KDTree to find KNN
+        cortex = k_nearest_polygons(cortex)
+        edges = []
+        for ctx in cortex:
+            for poly in ctx["structures"]:
+                if poly["nearest edge"] > 0:
+                    edges.append(poly["nearest edge"])
+
+        # There will be duplicate edges that need to be removed. We can remove them and
+        # preserve their order in O(N) time on average using list(dict.fromkeys(edges))
+        pruned_edges = list(dict.fromkeys(edges))
+
+        # For this first implementation, we want to define multiple cutoffs to see which
+        # cutoff aligns best with clinical practice. We will use quantile 1, median and
+        # quantile 3 for cutoffs
+        q1 = np.quantile(pruned_edges, q=0.25)
+        q2 = np.quantile(pruned_edges, q=0.5)
+        q3 = np.quantile(pruned_edges, q=0.75)
+        q1_norm, q2_norm, q3_norm, q1_fib, q2_fib, q3_fib = 0, 0, 0, 0, 0, 0
+        for edge in pruned_edges:
+            # We create small squares with each edge. If the area of that square is greater
+            # than the area of the cutoff, we define the difference in area as fibrosis
+
+            # Cutoff = Q1
+            normal_area, fibrosis_area = compute_fibrosis_area(edge, q1)
+            q1_norm += normal_area
+            q1_fib += fibrosis_area
+            # Cutoff = Q2
+            normal_area, fibrosis_area = compute_fibrosis_area(edge, q2)
+            q2_norm += normal_area
+            q2_fib += fibrosis_area
+            # Cutoff = Q2
+            normal_area, fibrosis_area = compute_fibrosis_area(edge, q3)
+            q3_norm += normal_area
+            q3_fib += fibrosis_area
+
+        # Compute proportions of fibrotic tissue
+        q1_prop = q1_fib / (q1_fib + q1_norm)
+        q2_prop = q2_fib / (q2_fib + q2_norm)
+        q3_prop = q3_fib / (q3_fib + q3_norm)
+
+        ci_score = {
+            "Q1": {
+                "Cutoff": round(q1, 1),
+                "Normal Area": round(q1_norm, 1),
+                "Fibrosis Area": round(q1_fib, 1),
+                "Proportion of Fibrosis": round(q1_prop, 3),
+                "ci Score (Discrete)": ci_threshold(q1_prop, discrete=True),
+                "ci Score (Continuous)": ci_threshold(q1_prop, discrete=False),
+            },
+            "Q2": {
+                "Cutoff": round(q2, 1),
+                "Normal Area": round(q2_norm, 1),
+                "Fibrosis Area": round(q2_fib, 1),
+                "Proportion of Fibrosis": round(q2_prop, 3),
+                "ci Score (Discrete)": ci_threshold(q2_prop, discrete=True),
+                "ci Score (Continuous)": ci_threshold(q2_prop, discrete=False),
+            },
+            "Q3": {
+                "Cutoff": round(q3, 1),
+                "Normal Area": round(q3_norm, 1),
+                "Fibrosis Area": round(q3_fib, 1),
+                "Proportion of Fibrosis": round(q3_prop, 3),
+                "ci Score (Discrete)": ci_threshold(q3_prop, discrete=True),
+                "ci Score (Continuous)": ci_threshold(q3_prop, discrete=False),
+            },
+            "Edge Lengths": pruned_edges,
+        }
+
+        return ci_score
 
     def compute_ct(self) -> dict[str, Any]:
         """Compute the tubular atrophy (ct) Banff lesion score.
@@ -115,8 +269,8 @@ class BanffLesionScore:
         are considered atrophied.
 
         The ct score is assigned based on the proportion of atrophied tubules:
-            - Score 1: 0–25% atrophied
-            - Score 2: 25–50% atrophied
+            - Score 1: 0-25% atrophied
+            - Score 2: 25-50% atrophied
             - Score 3: >50% atrophied
 
         Returns:
@@ -142,9 +296,7 @@ class BanffLesionScore:
         normal_diameter = np.percentile(diameters, 80)
 
         # Estimate the proportion of tubular atrophy
-        atrophied_tubules = np.sum(
-            np.asarray(diameters) < normal_diameter * 0.5
-        )
+        atrophied_tubules = np.sum(np.asarray(diameters) < normal_diameter * 0.5)
         atrophy_proportion = atrophied_tubules / len(diameters)
 
         # Calculate ct score
@@ -157,9 +309,7 @@ class BanffLesionScore:
             ct_score = 3
 
         # Get the range and IQR for the diameters
-        range = (
-            f"[{round(np.min(diameters), 1)}, {round(np.max(diameters), 1)}]"
-        )
+        range = f"[{round(np.min(diameters), 1)}, {round(np.max(diameters), 1)}]"
         iqr = (
             f"[{round(np.percentile(diameters, 25), 1)}, "
             f"{round(np.median(diameters), 1)}, "
@@ -212,9 +362,7 @@ class BanffLesionScore:
 
         # Compute 95% confidence interval
         lower_bound, upper_bound = wilson_interval(count_gsg, n)
-        confidence_interval = (
-            f"[{100 * round(lower_bound, 4)}, {100 * round(upper_bound, 4)}]"
-        )
+        confidence_interval = f"[{100 * round(lower_bound, 4)}, {100 * round(upper_bound, 4)}]"
 
         return {
             "Glomeruli Seen": n,
@@ -223,9 +371,7 @@ class BanffLesionScore:
             "95% Confidence Interval For GS %": confidence_interval,
         }
 
-    def draw_ci(
-        self, pdf_canvas: Canvas, x: float, y: float
-    ) -> tuple[Canvas, float]:
+    def draw_ci(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
         """Draw interstitial fibrosis (ci) section on the PDF report.
 
         This method calls the compute_ci() function and formats its results as
@@ -240,18 +386,43 @@ class BanffLesionScore:
         Returns:
             tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
         """
+        # Start with a section header
+        section_header = ["Interstitial Fibrosis:"]
+        pdf_canvas, y = draw_text(pdf_canvas, x, y, section_header)
         ci_results = self.compute_ci()
-        ci_content = ["Interstitial Fibrosis:"]
-        for item in ci_results:
-            ci_content.append(item)
 
-        pdf_canvas, y = draw_text(pdf_canvas, x, y, ci_content)
+        # Plot histogram of edges
+        edges = ci_results.pop("Edge Lengths", None)
+        med_val = np.median(edges)
+        fig = create_histogram(
+            edges,
+            "Distances Between Cortex Structures",
+            "Edge Distance",
+            "Count",
+            med_val,
+            "Median Value",
+        )
+        pdf_canvas, y = draw_plot(pdf_canvas, fig, 50, y)
+
+        # Print a table of Q1 results
+        q1_results = ci_results.get("Q1", "")
+        q1_header = ["Q1 Cutoff Results"]
+        q1_table = create_table(q1_results)
+        pdf_canvas, y = draw_table(pdf_canvas, q1_table, 50, y, q1_header)
+        # Print a table of Q2 results
+        q2_results = ci_results.get("Q2", "")
+        q2_header = ["Q2 Cutoff Results"]
+        q2_table = create_table(q2_results)
+        pdf_canvas, y = draw_table(pdf_canvas, q2_table, 50, y, q2_header)
+        # Print a table of Q3 results
+        q3_results = ci_results.get("Q3", "")
+        q3_header = ["Q3 Cutoff Results"]
+        q3_table = create_table(q3_results)
+        pdf_canvas, y = draw_table(pdf_canvas, q3_table, 50, y, q3_header)
 
         return pdf_canvas, y
 
-    def draw_ct(
-        self, pdf_canvas: Canvas, x: float, y: float
-    ) -> tuple[Canvas, float]:
+    def draw_ct(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
         """Draw tubular atrophy (ct) section on the PDF report.
 
         This method calls compute_ct() to calculate atrophy metrics and then
@@ -272,39 +443,30 @@ class BanffLesionScore:
         """
         ct_results = self.compute_ct()
         ct_text = ["Tubular Atrophy:"]
-
-        # Create summary table
-        diameters = ct_results.pop("Tubule Diameters", None)
-        ct_table = create_table(ct_results)
-        pdf_canvas, y = draw_table(pdf_canvas, ct_table, x, y, ct_text)
+        pdf_canvas, y = draw_text(pdf_canvas, x, y, ct_text)
 
         # Create histogram for diameters
-        fig = plt.figure(figsize=(3, 2))
-        plt.title("Tubule Diameters")
-        plt.hist(diameters)
-        plt.ylabel("Count")
-        plt.xlabel("Diameter (microns)")
-        ymin, ymax = plt.ylim()
+        diameters = ct_results.pop("Tubule Diameters", None)
         threshold = (
-            ct_results["Diamter Length at 80th Percentile"]
-            - 0.5 * ct_results["Diamter Length at 80th Percentile"]
+            ct_results["Diamter Length at 80th Percentile"] - 0.5 * ct_results["Diamter Length at 80th Percentile"]
         )
-        plt.vlines(
-            x=threshold,
-            ymin=ymin,
-            ymax=ymax + 50,
-            label=f"Atrophy Threshold = {round(threshold, 1)}",
-            colors="#b22222",
+        fig = create_histogram(
+            diameters,
+            "Tubular Diameters",
+            "Diameter (microns)",
+            "Count",
+            threshold,
+            "Atropy Threshold",
         )
-        plt.legend()
-
         pdf_canvas, y = draw_plot(pdf_canvas, fig, x, y)
+
+        # Create summary table
+        ct_table = create_table(ct_results)
+        pdf_canvas, y = draw_table(pdf_canvas, ct_table, x, y, ["Summary of Tubular Atropy"])
 
         return pdf_canvas, y
 
-    def draw_cv(
-        self, pdf_canvas: Canvas, x: float, y: float
-    ) -> tuple[Canvas, float]:
+    def draw_cv(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
         """Draw vascular intimal thickening (cv) section on the PDF report.
 
         This method calls compute_cv() and formats the returned results as a
@@ -328,9 +490,7 @@ class BanffLesionScore:
 
         return pdf_canvas, y
 
-    def draw_gs(
-        self, pdf_canvas: Canvas, x: float, y: float
-    ) -> tuple[Canvas, float]:
+    def draw_gs(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
         """Draw glomerulosclerosis (gs) section on the PDF report.
 
         This method calls compute_gs() to retrieve counts, percentages, and
@@ -380,9 +540,7 @@ class BanffLesionScore:
         x, y = 50, letter[1] - 50
         path = "BANFF-AID Report.pdf"
         pdf_canvas = Canvas(path, pagesize=letter)
-        pdf_canvas, y = draw_text(
-            pdf_canvas, x, y, report_title, centered=True, font_size=16
-        )
+        pdf_canvas, y = draw_text(pdf_canvas, x, y, report_title, centered=True, font_size=16)
 
         # Begin adding results from each of the Banff lesion scores
 
