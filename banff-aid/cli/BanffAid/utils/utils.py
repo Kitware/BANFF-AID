@@ -68,30 +68,6 @@ def ci_threshold(proportion: float, discrete: bool = True) -> float | int:
             return 3 + ((proportion - 0.51) / (1 - 0.51)) * 1
 
 
-def compute_fibrosis_area(edge: float, cutoff: float) -> tuple[float, float]:
-    """Compute normal and fibrotic area from edge length and cutoff.
-
-    Treat each edge as defining a square region. If the edge length exceeds
-    the cutoff, the normal area is the cutoff² and the excess is fibrosis.
-    Otherwise, the entire square is normal and fibrosis is zero.
-
-    Args:
-        edge (float): Edge length of the square region.
-        cutoff (float): Cutoff edge length defining normal tissue.
-
-    Returns:
-        tuple[float, float]: A pair (normal_area, fibrosis_area).
-    """
-    if edge**2 > cutoff**2:
-        normal = cutoff**2
-        fibrosis = edge**2 - cutoff**2
-    else:
-        normal = edge**2
-        fibrosis = 0
-
-    return normal, fibrosis
-
-
 def compute_max_distance(points):
     """Compute the maximum distance from an interior point to the edge of a polygon.
 
@@ -206,6 +182,82 @@ def convert_to_microns(points: list[tuple], mpp_x: float, mpp_y: float) -> list[
     return points_in_microns
 
 
+def cortical_fibrotic_area(cortex: dict[str, Any], threshold: float) -> tuple[float, float]:
+    """Estimate fibrotic cortical interstitium by threshold and calcualte its area.
+
+    This function takes in a dictionary containing points and other structure as a
+    sub-section of cortical interstitium and computes the total area (in pixel units)
+    and the area of estimated fibrotic region. Fibrotic region is estimated as a
+    distance from the edge of the interstitium where any pixel at a distance from the
+    edge greater than this cutoff is considered fibrotic. Care is also taken into
+    account to remove any cortical segmentation overlapping with exisiting structures
+    (e.g. arteries, tubules etc.).
+
+    Args:
+        cortex (dict[str, Any]): A dictionary containing closed points ('points') which
+        defines the cortex and a list of cortical structures ('structures')
+        threshold (float): The distance threshold at which to classify interstitium as
+        fibrotic.
+
+
+    Returns:
+        tuple[float, float]: A tuple of the total area of the cortical interstitium and
+        the area of the fibrotic region of the cortical interstitium. Note: These areas
+        are in pixel units and have not been converted to microns.
+    """
+    # Extract points and structures
+    points = cortex["points"]
+    structures = cortex["structures"]
+
+    # We want to get the boundaries for all the structures in this cortical region
+    boundaries: list[tuple[float, float, float, float]] = []
+    boundaries.append(get_boundaries(cortex))
+    for struct in structures:
+        boundaries.append(get_boundaries(struct))
+
+    # Determin the bounding box of all polygons included in this region of the cortex
+    boundaries_np = np.array(boundaries, dtype=np.int32)
+    min_x = boundaries_np[:, 0].min()
+    max_x = boundaries_np[:, 1].max()
+    min_y = boundaries_np[:, 2].min()
+    max_y = boundaries_np[:, 3].max()
+
+    # Compute width and height for the mask (include boundaries)
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+
+    # Create a blank image (mask) using Pillow (mode 'L' for grayscale)
+    mask_img = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask_img)
+
+    # Shift polygon coordinates so that they fit within the mask
+    adjusted_points = [(p[0] - min_x, p[1] - min_y) for p in points]
+
+    # Fill the polygon in the mask with white (value 1)
+    draw.polygon(adjusted_points, outline=1, fill=1)
+
+    # It is possible for the segmentation for the cortical interstitium to overlap with
+    # other structures (e.g. arteries). For that reason, we want to remove any of the
+    # overlap by filling in that space with 0's (i.e. no interstitium)
+    for struct in structures:
+        struct_points = [(p[0] - min_x, p[1] - min_y) for p in struct["points"]]
+        draw.polygon(struct_points, fill=0, outline=0)
+
+    # Convert the PIL image to a NumPy array
+    mask = np.array(mask_img)
+
+    # Compute the Euclidean distance transform on the mask
+    dist_transform = ndi.distance_transform_edt(mask)
+    cort_interstitium = np.where(dist_transform > 0, 1, 0)
+    cort_fibrosis = np.where(dist_transform > threshold, 1, 0)
+
+    # 'Area' in pixel units will be the sum of all 1's representing the interstitial
+    # pixels
+    interstitial_area, fibrotic_area = cort_interstitium.sum(), cort_fibrosis.sum()
+
+    return interstitial_area, fibrotic_area
+
+
 def create_histogram(
     x: list[float],
     title: str = None,
@@ -216,7 +268,7 @@ def create_histogram(
 ) -> Figure:
     """Create a matplotlib histogram with an optional vertical reference line.
 
-    Converts the input data to a NumPy array, builds a square (3"×3") figure,
+    Converts the input data to a NumPy array, builds a square (3"X3") figure,
     and plots a histogram with a sensible default bin count. If `vline` is
     provided, draws a dashed vertical line annotated by `linelab`.
 
@@ -631,8 +683,21 @@ def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tup
     return mpp_x, mpp_y
 
 
-def get_boundaries(element: dict):
-    """Gets the min and max for x and y values."""
+def get_boundaries(element: dict[str, Any]):
+    """Compute the bounding box for a set of 2D points.
+
+    Extracts the minimum and maximum x and y values from a dictionary
+    containing a list of 2D points under the key "points". Each point is
+    expected to be a tuple or list with two numeric values representing
+    the x and y coordinates.
+
+    Args:
+        element (dict): A dictionary containing a key "points" that maps
+            to a list of (x, y) coordinate pairs.
+
+    Returns:
+        tuple: A tuple of four elements: (min_x, max_x, min_y, max_y).
+    """
     x = [p[0] for p in element["points"]]
     y = [p[1] for p in element["points"]]
     return min(x), max(x), min(y), max(y)
@@ -803,9 +868,10 @@ def within_boundaries(element: dict, box: tuple) -> bool:
     # Extract x and y values of the element
     element_x = [p[0] for p in element["points"]]
     element_y = [p[1] for p in element["points"]]
+
     return (
-        # How loose should we be with this restriction? As it stands, this is including
-        # any polygon that overlaps at all with the cortical interstitium
+        # This logic includes any polygon that overlaps at all with the cortical
+        # interstitium
         max(element_x) > box[0]
         and min(element_x) < box[1]
         and max(element_y) > box[2]
