@@ -17,7 +17,6 @@ CLI plugin and can be run as a standalone report generator in HistomicsTK.
 from datetime import datetime
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 from girder_client import GirderClient
 from reportlab.lib.pagesizes import letter
@@ -26,7 +25,7 @@ from slicer_cli_web import CLIArgumentParser
 from utils.utils import (
     ci_threshold,
     compute_max_distance,
-    compute_fibrosis_area,
+    cortical_fibrotic_area,
     compute_polygon_centroid,
     convert_to_microns,
     create_histogram,
@@ -206,53 +205,54 @@ class BanffLesionScore:
         q1 = np.quantile(pruned_edges, q=0.25)
         q2 = np.quantile(pruned_edges, q=0.5)
         q3 = np.quantile(pruned_edges, q=0.75)
-        q1_norm, q2_norm, q3_norm, q1_fib, q2_fib, q3_fib = 0, 0, 0, 0, 0, 0
-        for edge in pruned_edges:
-            # We create small squares with each edge. If the area of that square is greater
-            # than the area of the cutoff, we define the difference in area as fibrosis
+        normal_q1, normal_q2, normal_q3 = 0, 0, 0
+        fibrosis_q1, fibrosis_q2, fibrosis_q3 = 0, 0, 0
 
-            # Cutoff = Q1
-            normal_area, fibrosis_area = compute_fibrosis_area(edge, q1)
-            q1_norm += normal_area
-            q1_fib += fibrosis_area
-            # Cutoff = Q2
-            normal_area, fibrosis_area = compute_fibrosis_area(edge, q2)
-            q2_norm += normal_area
-            q2_fib += fibrosis_area
-            # Cutoff = Q2
-            normal_area, fibrosis_area = compute_fibrosis_area(edge, q3)
-            q3_norm += normal_area
-            q3_fib += fibrosis_area
+        for ctx_section in cortex:
+            # Compute areas by Q1
+            normal, fibrosis = cortical_fibrotic_area(ctx_section, q1)
+            normal_q1 += normal
+            fibrosis_q1 += fibrosis
+
+            # Compute areas by Q2
+            normal, fibrosis = cortical_fibrotic_area(ctx_section, q2)
+            normal_q2 += normal
+            fibrosis_q2 += fibrosis
+
+            # Compute areas by Q3
+            normal, fibrosis = cortical_fibrotic_area(ctx_section, q3)
+            normal_q3 += normal
+            fibrosis_q3 += fibrosis
 
         # Compute proportions of fibrotic tissue
-        q1_prop = q1_fib / (q1_fib + q1_norm)
-        q2_prop = q2_fib / (q2_fib + q2_norm)
-        q3_prop = q3_fib / (q3_fib + q3_norm)
+        prop_q1 = fibrosis_q1 / (fibrosis_q1 + normal_q1)
+        prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
+        prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
 
         ci_score = {
             "Q1": {
                 "Cutoff": round(q1, 1),
-                "Normal Area": round(q1_norm, 1),
-                "Fibrosis Area": round(q1_fib, 1),
-                "Proportion of Fibrosis": round(q1_prop, 3),
-                "ci Score (Discrete)": ci_threshold(q1_prop, discrete=True),
-                "ci Score (Continuous)": ci_threshold(q1_prop, discrete=False),
+                "Normal Area": round(normal_q1),
+                "Fibrosis Area": round(fibrosis_q1),
+                "Proportion of Fibrosis": round(prop_q1, 3),
+                "ci Score (Discrete)": ci_threshold(prop_q1, discrete=True),
+                "ci Score (Continuous)": round(ci_threshold(prop_q1, discrete=False), 3),
             },
             "Q2": {
                 "Cutoff": round(q2, 1),
-                "Normal Area": round(q2_norm, 1),
-                "Fibrosis Area": round(q2_fib, 1),
-                "Proportion of Fibrosis": round(q2_prop, 3),
-                "ci Score (Discrete)": ci_threshold(q2_prop, discrete=True),
-                "ci Score (Continuous)": ci_threshold(q2_prop, discrete=False),
+                "Normal Area": round(normal_q2),
+                "Fibrosis Area": round(fibrosis_q2),
+                "Proportion of Fibrosis": round(prop_q2, 3),
+                "ci Score (Discrete)": ci_threshold(prop_q2, discrete=True),
+                "ci Score (Continuous)": round(ci_threshold(prop_q2, discrete=False), 3),
             },
             "Q3": {
                 "Cutoff": round(q3, 1),
-                "Normal Area": round(q3_norm, 1),
-                "Fibrosis Area": round(q3_fib, 1),
-                "Proportion of Fibrosis": round(q3_prop, 3),
-                "ci Score (Discrete)": ci_threshold(q3_prop, discrete=True),
-                "ci Score (Continuous)": ci_threshold(q3_prop, discrete=False),
+                "Normal Area": round(normal_q3),
+                "Fibrosis Area": round(fibrosis_q3),
+                "Proportion of Fibrosis": round(prop_q3, 3),
+                "ci Score (Discrete)": ci_threshold(prop_q3, discrete=True),
+                "ci Score (Continuous)": round(ci_threshold(prop_q3, discrete=False), 3),
             },
             "Edge Lengths": pruned_edges,
         }
@@ -358,11 +358,11 @@ class BanffLesionScore:
 
         # Compute proportion of GSG
         gsg_proportion = count_gsg / n
-        glomeruli_sclerosed_percentage = f"{100 * round(gsg_proportion, 4)}"
+        glomeruli_sclerosed_percentage = f"{100 * round(gsg_proportion, 3)}"
 
         # Compute 95% confidence interval
         lower_bound, upper_bound = wilson_interval(count_gsg, n)
-        confidence_interval = f"[{100 * round(lower_bound, 4)}, {100 * round(upper_bound, 4)}]"
+        confidence_interval = f"[{100 * round(lower_bound, 3)}, {100 * round(upper_bound, 3)}]"
 
         return {
             "Glomeruli Seen": n,
