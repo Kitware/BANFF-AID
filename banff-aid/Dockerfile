@@ -19,17 +19,22 @@ COPY . $MY_PLUGIN_PATH
 # Upgrade pip and setuptools and install the package using pyproject.toml as source
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir . --find-links https://girder.github.io/large_image_wheels && \
-    rm -rf /root/.cache/pip/*
+    rm -rf /root/.cache/pip/* && apt-get update && apt-get install -y gcc python3-dev git &&\
+    pip install --no-cache-dir cython && rm -rf /var/lib/apt/lists/*
 
-# Switch to the CLI directory (update the path if your CLI remains within banff-aid/cli)
+# Install detectron2 here using '--no-build-isolation' flag. Installing in 
+# pyproject.toml leads to issues with the build because it can't detect dependencies. 
+RUN pip install --no-build-isolation \
+       git+https://github.com/facebookresearch/detectron2.git@v0.6#egg=detectron2 
+
 WORKDIR $MY_PLUGIN_PATH/banff-aid/cli
 
-# Optionally show that your new CLI is recognized
+# Ensure your new CLI is recognized
 RUN python -m slicer_cli_web.cli_list_entrypoint --list_cli
 
 # If you want to see the help of your new CLI
 RUN python -m slicer_cli_web.cli_list_entrypoint BanffAid --help
 
-# For demonstration, set the entrypoint to a shell that has your plugin code installed.
+# Set the entrypoint to a shell that has your plugin code installed
 ENTRYPOINT ["/bin/bash", "docker-entrypoint.sh"]
 

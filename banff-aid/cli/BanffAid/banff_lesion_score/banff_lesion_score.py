@@ -17,13 +17,16 @@ CLI plugin and can be run as a standalone report generator in HistomicsTK.
 from datetime import datetime
 from typing import Any
 
+import large_image
 import numpy as np
+from PIL import Image, ImageDraw
 from girder_client import GirderClient
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
 from slicer_cli_web import CLIArgumentParser
 from utils.utils import (
     ci_threshold,
+    cv_threshold,
     compute_max_distance,
     cortical_fibrotic_area,
     compute_polygon_centroid,
@@ -37,6 +40,10 @@ from utils.utils import (
     fetch_mpp,
     get_boundaries,
     k_nearest_polygons,
+    lumen_mask,
+    shoelace_area,
+    shortest_width,
+    shrink_artery,
     wilson_interval,
     within_boundaries,
 )
@@ -327,17 +334,190 @@ class BanffLesionScore:
             "'ct' Score": ct_score,
         }
 
-    def compute_cv(self) -> None:
-        """Compute the vascular intimal thickening (cv) Banff lesion score.
+    def compute_cv(self, lumen_threshold: float = 0.8) -> dict[str, Any]:
+        """Compute the Banff lesion score for vascular intimal thickening ('cv').
 
-        This method is currently unimplemented. It is intended to analyze
-        arterial wall annotations and compute a cv score based on the degree
-        of intimal thickening observed.
+        This method analyzes annotated arterial regions in a whole-slide image to
+        quantify vascular intimal thickening. It computes geometric features of the
+        arterial wall and lumen, estimates lumen loss, and calculates both discrete and
+        continuous 'cv' scores following the approach described in Zhang et al. (2023).
+
+        The process includes:
+            - Validating artery annotations.
+            - Extracting arterial image regions.
+            - Segmenting the lumen.
+            - Estimating media width and constructing the intimal region.
+            - Calculating lumen area loss (adjusted and unadjusted).
+            - Scoring the arteries using threshold-based and weighted schemes.
+            - Returning a summary dictionary with the most severe and weighted scores.
+        Args:
+            lumen_threshold (float): Threshold value used to segment the lumen region
+                from the arterial image. Controls sensitivity of lumen detection.
+        Raises:
+            ValueError: If no valid arteries are found or an annotation lies outside
+                the image bounds.
 
         Returns:
-            None
+            dict: A summary of computed cv metrics, including:
+                - Severest Luminal Area Loss (Max)
+                - Top Three Weighted Average Luminal Area Loss (if ≥3 arteries)
+                - Max 'cv' Score (Discrete)
+                - Max 'cv' Score (Continuous)
+                - Weighted Average 'cv' Score (Discrete) (if ≥3 arteries)
+                - Weighted Average 'cv' Score (Continuous) (if ≥3 arteries)
+                - Number of Arteries Evaluated
         """
-        return ["No implementation."]
+        source = large_image.open(self.image_id)
+        artery_summaries: list[dict[str, Any]] = []
+        for artery in self.arteries["annotation"]["elements"]:
+            xmin, xmax, ymin, ymax = get_boundaries(artery)
+
+            # Ensure arterial region is within the selected image. If it isn't, this
+            # would indicate a mismatch between the annotation and the image
+            if xmax > source.sizeX or ymax > source.sizeY:
+                raise ValueError(
+                    "Arterial region is outside image boundaries.\n"
+                    "Please ensure annotations are matching this large image."
+                )
+
+            # Only conduct analysis on closed arterial annotations with at least 3
+            # unique points (length >= 4 because points[0] == points[-1])
+            if artery["points"][0] != artery["points"][-1]:
+                artery["points"].append(artery["points"][0])
+            if len(artery["points"]) < 4:
+                continue
+
+            # getRegion returns a tuple, and the first element is in RGBA. We want the
+            # first element in RGB
+            region = {
+                "left": xmin,
+                "top": ymin,
+                "width": xmax - xmin,
+                "height": ymax - ymin,
+                "units": "base_pixels",
+            }
+
+            img_array = source.getRegion(format=large_image.tilesource.TILE_FORMAT_NUMPY, region=region)[0][:, :, :3]
+
+            # Add a mask to determine which pixels are inside the polygon region
+            shape = img_array.shape
+            artery_mask = Image.new(mode="L", size=(shape[1], shape[0]), color=0)
+            draw = ImageDraw.Draw(artery_mask)
+            adjusted_point = [(p[0] - xmin, p[1] - ymin) for p in artery["points"]]
+            draw.polygon(adjusted_point, fill=1, outline=1)
+            artery_mask = np.array(artery_mask)
+
+            # We need to catch an error if no luminal mask is found
+            try:
+                # Compute the luminal mask and perimeter
+                lumen = lumen_mask(img_array, artery_mask, lumen_threshold)
+
+            except ValueError as e:
+                artery_centroid = compute_polygon_centroid(artery["points"])
+                artery_centroid = (int(artery_centroid[0]), int(artery_centroid[1]))
+                print(f"Warning: Failed to build luminal mask at {artery_centroid}:" f"'{e}' Artery ignored.")
+
+                continue
+
+            # Reduce the artery by the length of the (estimated) media width. This is
+            # the intimal wall
+            media_width = shortest_width(artery_mask, lumen["perimeter"])
+            intima_points = shrink_artery(artery["points"], media_width["width"], xmin=xmin, ymin=ymin)
+
+            # We now transform the radius of the lumen to be adjusted radius = r_lumen +
+            # d,where r_lumen is the observed radius and d = np.sqrt((ci_x - cl_x)**2 +
+            # (ci_y - cl_y)**2) (cl is luminal centroid, ci is intimal centroid)
+            # Note: It is impossible for the current lumen to be larger than the intimal
+            # wall, so we place a cap on the adjusted radius to be the minimum of the
+            # intimal radius or the adjusted radius
+            area_intima = shoelace_area(intima_points)
+            area_lumen = shoelace_area(lumen["perimeter"])
+            centroid_intima = compute_polygon_centroid(intima_points)
+            centroid_lumen = compute_polygon_centroid(lumen["perimeter"])
+            centroid_diff = np.linalg.norm(np.array(centroid_intima) - np.array(centroid_lumen))
+            radius_observed = np.sqrt(area_lumen / np.pi)
+            radius_intima = np.sqrt(area_intima / np.pi)
+            radius_adjusted = radius_observed + centroid_diff
+            radius_adjusted = min(radius_adjusted, radius_intima)
+
+            # Calculate the adjusted luminal area and compute the loss
+            area_lumen_adjusted = np.pi * radius_adjusted**2
+            lumen_loss_percent = (area_intima - area_lumen_adjusted) / area_intima
+            unadjusted_loss_percent = (area_intima - area_lumen) / area_intima
+
+            artery_summaries.append(
+                {
+                    "Intimal Wall Ring Radius": radius_intima,
+                    "Luminal Radius (Unadjusted)": radius_observed,
+                    "Luminal Radius (Adjusted)": radius_adjusted,
+                    "Luminal Area Loss (Unadjusted)": unadjusted_loss_percent,
+                    "Luminal Area Loss (Adjusted)": lumen_loss_percent,
+                }
+            )
+
+        # In Zhang et. all 2023, they described excluding small arteries to avoid unfair
+        # comparisons. They then computed a weighted average of the 3 most severe arteries
+        # (weighted by artery size). We will report the most severe artery, the weighted
+        # average of the top three arteries, and the cv scores (discrete and continuous)
+        # for only the most severely affected artery.
+        # Note: In Zhang et al.'s paper, they did not say what size to exclude an artery.
+        # Here, we exclude any artery with an intimal-ring radius of less than 50% of the
+        # median value.
+        if len(artery_summaries) > 2:
+            median_size = np.median([a["Intimal Wall Ring Radius"] for a in artery_summaries])
+            acceptable_arteries = sorted(
+                [a for a in artery_summaries if a["Intimal Wall Ring Radius"] >= 0.5 * median_size],
+                key=lambda a: a["Luminal Area Loss (Adjusted)"],
+            )
+            top_three_arteries = acceptable_arteries[-3:]
+            radius_sum = np.sum([a["Intimal Wall Ring Radius"] for a in top_three_arteries])
+            area_loss_max = top_three_arteries[-1]["Luminal Area Loss (Adjusted)"]
+            area_loss_weighted = np.sum(
+                [
+                    (a["Intimal Wall Ring Radius"] / radius_sum) * a["Luminal Area Loss (Adjusted)"]
+                    for a in top_three_arteries
+                ]
+            )
+
+            # Compute cv scores
+            cv_discrete_max = cv_threshold(area_loss_max)
+            cv_continuous_max = round(cv_threshold(area_loss_max, False), 2)
+            cv_discrete_weighted = cv_threshold(area_loss_weighted)
+            cv_continuous_weighted = round(cv_threshold(area_loss_weighted, False), 2)
+
+            cv_summary = {
+                "Severest Luminal Area Loss (Max)": f"{round(area_loss_max, 3)*100}%",
+                "Severest Luminal Area Loss (Top Three Weighted Average)": f"{round(area_loss_weighted, 3)*100}%",
+                "Max 'cv' Score (Discrete)": cv_discrete_max,
+                "Max 'cv' Score (Continuous)": cv_continuous_max,
+                "Weighted Average 'cv' Score (Discrete)": cv_discrete_weighted,
+                "Weighted Average 'cv' Score (Continuous)": cv_continuous_weighted,
+                "Number of Arteries Evaluated": len(artery_summaries),
+            }
+
+            return cv_summary
+
+        elif len(artery_summaries) > 0:
+            # If there are 1-2 arteries, we only look at the max
+            max_artery = sorted(
+                [a for a in artery_summaries],
+                key=lambda a: a["Luminal Area Loss (Adjusted)"],
+            )[-1]
+            area_loss = max_artery["Luminal Area Loss (Adjusted)"]
+            cv_discrete_max = cv_threshold(area_loss)
+            cv_continuous_max = round(cv_threshold(area_loss, discrete=False), 2)
+
+            cv_summary = {
+                "Severest Luminal Area Loss (Max)": f"{round(area_loss, 3)*100}%",
+                "Max 'cv' Score (Discrete)": cv_discrete_max,
+                "Max 'cv' Score (Continuous)": cv_continuous_max,
+                "Number of Arteries Evaluated": len(artery_summaries),
+            }
+
+            return cv_summary
+
+        else:
+            raise ValueError("No arteries detected. Not able to compute 'cv' score.")
 
     def compute_gs(self) -> dict[str, Any]:
         """Compute the glomerulosclerosis (gs) Banff lesion score.
@@ -483,10 +663,11 @@ class BanffLesionScore:
         """
         cv_results = self.compute_cv()
         cv_text = ["Vascular Intimal Thickening:"]
-        for item in cv_results:
-            cv_text.append(item)
-
         pdf_canvas, y = draw_text(pdf_canvas, x, y, cv_text)
+
+        # Create summary table
+        cv_table = create_table(cv_results)
+        pdf_canvas, y = draw_table(pdf_canvas, cv_table, x, y, ["Summary of Vascular Intimal Thickening"])
 
         return pdf_canvas, y
 

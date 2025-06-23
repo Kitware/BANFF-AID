@@ -28,6 +28,8 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
+from skimage.color import rgb2hsv
+from skimage.filters import gaussian
 from sklearn.neighbors import KDTree
 from slicer_cli_web import CLIArgumentParser
 
@@ -36,13 +38,13 @@ def ci_threshold(proportion: float, discrete: bool = True) -> float | int:
     """Compute a Banff interstitial fibrosis (ci) score from a proportion.
 
     Depending on the `discrete` flag, returns either a discrete score (0-3)
-    based on fixed cutoffs, or a continuous score (0.0-4.0) by linear
+    based on fixed cutoffs, or a continuous score (0.0-3.0) by linear
     interpolation within those bins.
 
     Args:
         proportion (float): Fraction of fibrotic tissue (0.0-1.0).
         discrete (bool): If True, return one of {0, 1, 2, 3}. Otherwise,
-            return a float in [0.0, 4.0).
+            return a float in [0.0, 3.0].
 
     Returns:
         int | float: Discrete integer score if `discrete` is True,
@@ -65,7 +67,43 @@ def ci_threshold(proportion: float, discrete: bool = True) -> float | int:
         elif proportion < 0.51:
             return 2 + ((proportion - 0.26) / (0.51 - 0.26)) * 1
         else:
-            return 3 + ((proportion - 0.51) / (1 - 0.51)) * 1
+            return 3.0
+
+
+def cv_threshold(reduction: float, discrete: bool = True) -> float | int:
+    """Compute a Banff intimal thickening (cv) score from a proportion of reduction.
+
+    Depending on the `discrete` flag, returns either a discrete score (0-3)
+    based on fixed cutoffs, or a continuous score (0.0-3.0) by linear
+    interpolation within those bins.
+
+    Args:
+        proportion (float): Fraction of fibrotic tissue (0.0-1.0).
+        discrete (bool): If True, return one of {0, 1, 2, 3}. Otherwise,
+            return a float in [0.0, 3.0].
+
+    Returns:
+        int | float: Discrete integer score if `discrete` is True,
+            else a continuous float score.
+    """
+    if discrete:
+        if reduction == 0.0:
+            return 0
+        elif reduction < 0.26:
+            return 1
+        elif reduction < 0.51:
+            return 2
+        else:
+            return 3
+    else:
+        if reduction == 0.0:
+            return 0.0
+        elif reduction < 0.26:
+            return 1 + (float(reduction) / 0.26) * 1
+        elif reduction < 0.51:
+            return 2 + ((float(reduction) - 0.26) / (0.51 - 0.26)) * 1
+        else:
+            return 3.0
 
 
 def compute_max_distance(points):
@@ -760,6 +798,135 @@ def k_nearest_polygons(cortex: list[dict[str, Any]], k: int = 6) -> list[dict[st
     return cortex
 
 
+def lumen_mask(img_array, mask, lumen_thresh=0.8) -> dict[str, Any]:
+    """Generates a lumen mask and its perimeter from an image and a tissue mask.
+
+    This function identifies the lumen within an image by applying a series
+    of image processing steps, including brightness thresholding, saturation
+    exclusion, and morphological operations. It then extracts the perimeter
+    of the largest identified lumen region.
+
+    Args:
+        img_array: A NumPy array representing the input image (likely RGB).
+        mask: A NumPy array representing the tissue mask.
+        lumen_thresh: An optional float representing the brightness threshold
+            for lumen identification. Defaults to 0.8.
+
+    Returns:
+        A dictionary containing:
+            mask: A 2D NumPy array representing the final lumen mask.
+            perimeter: A list of (x, y) tuples representing the ordered
+                coordinates of the lumen's perimeter. If no lumen is found,
+                the perimeter list will be empty.
+    """
+    # Add new axis on the 'mask' for broadcasting while trimming off the
+    # alpha pixel dimension on the 'img_array.' The end result of this product is
+    # the pixel values only within the annotated region. All other pixels are set to
+    # 0
+    img_array = img_array * mask[:, :, np.newaxis]
+
+    # Greyscale brightness
+    scaled = img_array.mean(axis=2) / 255.0
+
+    # Candidate by brightness
+    bright = scaled > lumen_thresh
+
+    # Exclude tissue by saturation
+    hsv = rgb2hsv(img_array)
+    g = gaussian(hsv[:, :, 1], 3)
+    tissue = g > 0.4
+    lumen_init = bright & (~tissue)
+
+    # Restrict to ROI polygon
+    lumen_init &= mask.astype(bool)
+
+    # Fill holes & remove small objects
+    lumen_mask = ndi.binary_fill_holes(lumen_init)
+
+    # Edge smoothing
+    struct = np.ones((3, 3), bool)
+    lumen_mask = ndi.binary_closing(lumen_mask, structure=struct)
+    lumen_mask = ndi.binary_opening(lumen_mask, structure=struct)
+
+    # Consider edge cases where there is no lumen identified in the tissue.
+    try:
+        lumen = lumen_perimeter(lumen_mask)
+        return lumen
+
+    except ValueError as e:
+
+        # return {"mask": lumen_mask, "perimeter": []}
+        raise ValueError(e)
+
+
+def lumen_perimeter(mask: np.ndarray) -> list:
+    """Extracts the perimeter of the largest connected component in a mask.
+
+    This function processes a given binary mask to identify the largest
+    connected region, finds its boundary, and ensures the boundary forms
+    a closed, counter-clockwise ring. It then generates a new mask
+    containing only this largest shape.
+
+    Args:
+        mask: A 2D NumPy array representing the input mask.
+
+    Returns:
+        A dictionary containing:
+            mask: A 2D NumPy array representing the mask of the largest
+                connected component.
+            perimeter: A list of (x, y) tuples representing the ordered
+                coordinates of the perimeter of the largest component.
+
+    Raises:
+        ValueError: If no regions are found in the input mask.
+        RuntimeError: If no contours are found for the largest region.
+    """
+    from skimage.measure import label, find_contours, regionprops
+    from shapely.geometry import LinearRing
+
+    # Ensure boolean mask
+    mask = mask.astype(bool)
+
+    # Label connected components (4-connected)
+    labeled = label(mask, connectivity=1)
+
+    # If no regions found, raise error
+    if labeled.max() == 0:
+        raise ValueError("No regions found in the mask.")
+
+    # Measure region properties to find the largest area
+    regions = regionprops(labeled)
+    largest_region = max(regions, key=lambda r: r.area)
+    region_label = largest_region.label
+
+    # Create a mask for the largest region
+    region_mask = labeled == region_label
+
+    # Find boundary contours
+    contours = find_contours(region_mask, level=0.5, fully_connected="low")
+    if not contours:
+        raise RuntimeError("No contours found in the largest region.")
+
+    # Use the largest contour
+    contour = max(contours, key=len)
+
+    # Convert to (x, y) and ensure closure
+    ring = [(int(x), int(y)) for y, x in contour]
+    if ring[0] != ring[-1]:
+        ring.append(ring[0])
+
+    # Ensure counter-clockwise direction
+    if not LinearRing(ring).is_ccw:
+        ring.reverse()
+
+    # Compute new mask with only the largest shape included
+    lumen = Image.new("L", size=(mask.shape[1], mask.shape[0]))
+    draw = ImageDraw.Draw(lumen)
+    draw.polygon(ring, fill=1)
+
+    return {"mask": np.array(lumen), "perimeter": ring}
+
+
 def nearest_edge(polygon_a: dict[str, Any], polygon_b: list[list[float]], k: int = 6) -> float:
     """Compute the minimum distance between two polygon boundaries.
 
@@ -796,6 +963,107 @@ def nearest_edge(polygon_a: dict[str, Any], polygon_b: list[list[float]], k: int
     edges: list[float] = [np.linalg.norm(np.array(pa) - np.array(pb)) for pa in nearest_a for pb in nearest_b]
 
     return min(edges)
+
+
+def shoelace_area(points: list[list[float]]) -> float:
+    """Calculates the area of a polygon using the shoelace formula.
+
+    Args:
+        points: A list of lists, where each inner list contains the (x, y)
+            coordinates of a polygon vertex in order (either clockwise or
+            counter-clockwise).
+
+    Returns:
+        The calculated area of the polygon.
+    """
+    x = np.array([p[0] for p in points])
+    y = np.array([p[1] for p in points])
+    area = abs(0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+
+    return area
+
+
+def shortest_width(artery_mask: np.ndarray, lumen_perimeter: list[list[float]]) -> float:
+    """Finds the shortest width and its coordinates within an artery mask.
+
+    Args:
+        artery_mask: A 2D NumPy array representing the artery mask.
+        lumen_perimeter: A list of lists, where each inner list contains
+            the (x, y) coordinates of a point on the lumen's perimeter.
+
+    Returns:
+        A dictionary containing:
+            width: The shortest width found within the artery.
+            coordinates: The (x, y) coordinates where the shortest width
+                was found.
+    """
+    distance_transform = ndi.distance_transform_edt(artery_mask)
+    min_width = distance_transform.max()
+    min_coordinates = (0, 0)
+
+    # We need to be careful here. Often, points are in 3D (x, y, z). Sometimes it is
+    # only two. But there are always at least two
+    for p in lumen_perimeter:
+        # x and y will be treated as indices for finding the distance for the point.
+        # We use np.floor here to avoid a case with an index error
+        x, y = np.floor(p[0]), np.floor(p[1])
+
+        # Compare the distance with the current minimum distance. Update if it is lower
+        current_width = distance_transform[y, x]
+        if current_width <= min_width:
+            min_width = current_width
+            min_coordinates = p
+
+    return {"width": min_width, "coordinates": min_coordinates}
+
+
+def shrink_artery(artery: list[list[float]], media_width: float, xmin: float = 0, ymin: float = 0):
+    """Reduces the size of an artery polygon by a specified media width.
+
+    This function shrinks the input artery polygon by moving each point
+    inward towards the polygon's centroid by a distance equal to the
+    `media_width`. The resulting points are then adjusted relative to
+    optional `xmin` and `ymin` offsets.
+
+    Args:
+        artery: A list of lists, where each inner list contains the (x, y)
+            coordinates of a point on the artery's perimeter.
+        media_width: The distance by which to shrink the artery.
+        xmin: An optional float representing the x-offset to apply to the
+            shrunk coordinates. Defaults to 0.
+        ymin: An optional float representing the y-offset to apply to the
+            shrunk coordinates. Defaults to 0.
+
+    Returns:
+        A list of (x, y) tuples representing the coordinates of the
+        shrunken artery.
+    """
+    # First, we compute the centroid so that all artery coordinates can be adjusted
+    # relative to the centroid
+    cx, cy = compute_polygon_centroid(artery)
+
+    # Shrink each point closer to the centroid by the length of the media width
+    adjusted_points: list[list[float]] = []
+    for p in artery:
+        x, y = p[0], p[1]
+        dx, dy = x - cx, y - cy
+        length = np.sqrt(dx**2 + dy**2)
+        if length == 0:
+            # In case a point is exactly at the centroid, do not move it
+            adjusted_points.append([x, y])
+            continue
+
+        # This [ux, uy] is the unit vector in the direction of the point away from the
+        # centroid
+        ux, uy = dx / length, dy / length
+
+        # Move in the opposite direction (i.e. toward the centroid) by the length of the
+        # media width
+        new_x = x - media_width * ux
+        new_y = y - media_width * uy
+        adjusted_points.append([new_x, new_y])
+
+    return [(p[0] - xmin, p[1] - ymin) for p in adjusted_points]
 
 
 def wilson_interval(k: int, n: int) -> tuple[float, float]:
