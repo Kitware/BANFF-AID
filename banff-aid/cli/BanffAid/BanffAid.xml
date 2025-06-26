@@ -25,17 +25,31 @@
       <longflag>image-id</longflag> 
       <description>Path to slide image with annotations</description>
     </image> 
+    <image reference="image_id">
+      <name>image_filepath</name>
+      <label>Input Image</label>
+      <channel>output</channel>
+      <index>0</index>
+      <description>Input image for which Banff lesions scores are computed</description>
+    </image>
   </parameters>
   
   <parameters advanced="true">
     <description>Input/output parameters</description>
-    <label>Girder API URL</label>
+    <label>Girder Client Setup</label>
     <string>
       <name>girder_api_url</name>
       <longflag>api-url</longflag>
       <label>Girder API URL</label>
       <description>A Girder API URL</description>
       <default>http://girder:8080/api/v1</default>
+    </string>
+    <string>
+      <name>image_style</name>
+      <longflag>image_style</longflag>
+      <label>Style Options</label>
+      <description>Image style options for compositing a multi-frame image</description>
+      <default>{#control:#current_image_style#}</default>
     </string>
   </parameters>
 

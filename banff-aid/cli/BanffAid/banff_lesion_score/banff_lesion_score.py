@@ -36,6 +36,7 @@ from utils.utils import (
     draw_plot,
     draw_table,
     draw_text,
+    get_mounted_path_from_file_id,
     fetch_annotations,
     fetch_mpp,
     get_boundaries,
@@ -88,6 +89,8 @@ class BanffLesionScore:
         # Image and folder
         self.image_id = args.image_id
         self.results_folder = args.results_folder
+        self.image_style = args.image_style
+        self.image_filepath = args.image_filepath
 
         # Girder Client Instantiation
         self.gc = GirderClient(apiUrl=args.girder_api_url)
@@ -209,19 +212,19 @@ class BanffLesionScore:
         # For this first implementation, we want to define multiple cutoffs to see which
         # cutoff aligns best with clinical practice. We will use quantile 1, median and
         # quantile 3 for cutoffs
-        q1 = np.quantile(pruned_edges, q=0.25)
+        q1 = 0
         q2 = np.quantile(pruned_edges, q=0.5)
         q3 = np.quantile(pruned_edges, q=0.75)
         normal_q1, normal_q2, normal_q3 = 0, 0, 0
         fibrosis_q1, fibrosis_q2, fibrosis_q3 = 0, 0, 0
 
         for ctx_section in cortex:
-            # Compute areas by Q1
+            # Compute areas without threshold
             normal, fibrosis = cortical_fibrotic_area(ctx_section, q1)
             normal_q1 += normal
             fibrosis_q1 += fibrosis
 
-            # Compute areas by Q2
+            # Compute areas by Q2 (median)
             normal, fibrosis = cortical_fibrotic_area(ctx_section, q2)
             normal_q2 += normal
             fibrosis_q2 += fibrosis
@@ -231,21 +234,31 @@ class BanffLesionScore:
             normal_q3 += normal
             fibrosis_q3 += fibrosis
 
+        # When computing fibrosis without a threshold, we're looking at total area of
+        # the cortex (including structures), rather than area of interstitial area only.
+        # We now want to go over all cortext structures and add their area to the normal
+        # area for the portion without a threshold
+        for ctx_section in cortex:
+            structures = ctx_section["structures"]
+            for struct in structures:
+                points = struct["points"]
+                # normal_q1 += shoelace_area(points)
+
         # Compute proportions of fibrotic tissue
         prop_q1 = fibrosis_q1 / (fibrosis_q1 + normal_q1)
         prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
         prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
 
         ci_score = {
-            "Q1": {
-                "Cutoff": round(q1, 1),
+            "No Cutoff": {
+                "Cutoff": "None",
                 "Normal Area": round(normal_q1),
                 "Fibrosis Area": round(fibrosis_q1),
                 "Proportion of Fibrosis": round(prop_q1, 3),
                 "ci Score (Discrete)": ci_threshold(prop_q1, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q1, discrete=False), 3),
             },
-            "Q2": {
+            "Median": {
                 "Cutoff": round(q2, 1),
                 "Normal Area": round(normal_q2),
                 "Fibrosis Area": round(fibrosis_q2),
@@ -253,7 +266,7 @@ class BanffLesionScore:
                 "ci Score (Discrete)": ci_threshold(prop_q2, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q2, discrete=False), 3),
             },
-            "Q3": {
+            "Third Quartile": {
                 "Cutoff": round(q3, 1),
                 "Normal Area": round(normal_q3),
                 "Fibrosis Area": round(fibrosis_q3),
@@ -367,9 +380,29 @@ class BanffLesionScore:
                 - Weighted Average 'cv' Score (Continuous) (if ≥3 arteries)
                 - Number of Arteries Evaluated
         """
-        source = large_image.open(self.image_id)
+        # We must first source the input image using large_image
+        # print(f"self.image_id = {self.image_id}")
+        # print(f"self.image_id_index = {self.image_filepath}")
+        # print(f"Getting the filepath:")
+        # image_info = self.gc.get(f"file/{self.image_id}")
+        # for thing, stuff in image_info.items():
+        #     print(f"Key: {thing}\nValue: {stuff}")
+        # try:
+        #     item_id = self.gc.get(f"file/{self.image_id}")["itemId"]
+        #     # source = large_image.open({"_id": item_id, "girder": True, "style": self.image_style})
+        #     source = large_image.getTileSource(item_id)
+        #     print("This is option one.")
+        # except:
+        #     source = large_image.getTileSource(self.image_filepath)
+        #     print("This is option two.")
+
+        # Warning: This doesn't work! BUG
+        source = large_image.getTileSource(self.image_id, style=self.image_style)
+        # We now iterate through all arteries in the given slide, computing arterial
+        # luminal loss for each one
         artery_summaries: list[dict[str, Any]] = []
-        for artery in self.arteries["annotation"]["elements"]:
+        print(f"Here it is! self.arteries_annotation = {self.arteries_annotation}")
+        for artery in self.arteries_annotation["annotation"]["elements"]:
             xmin, xmax, ymin, ymax = get_boundaries(artery)
 
             # Ensure arterial region is within the selected image. If it isn't, this
@@ -585,18 +618,18 @@ class BanffLesionScore:
         pdf_canvas, y = draw_plot(pdf_canvas, fig, 50, y)
 
         # Print a table of Q1 results
-        q1_results = ci_results.get("Q1", "")
-        q1_header = ["Q1 Cutoff Results"]
+        q1_results = ci_results.get("No Cutoff", "")
+        q1_header = ["Results with No Cutoff"]
         q1_table = create_table(q1_results)
         pdf_canvas, y = draw_table(pdf_canvas, q1_table, 50, y, q1_header)
         # Print a table of Q2 results
-        q2_results = ci_results.get("Q2", "")
-        q2_header = ["Q2 Cutoff Results"]
+        q2_results = ci_results.get("Median Value", "")
+        q2_header = ["Median Value Cutoff Results"]
         q2_table = create_table(q2_results)
         pdf_canvas, y = draw_table(pdf_canvas, q2_table, 50, y, q2_header)
         # Print a table of Q3 results
-        q3_results = ci_results.get("Q3", "")
-        q3_header = ["Q3 Cutoff Results"]
+        q3_results = ci_results.get("Third Quartile", "")
+        q3_header = ["Third Quartile Cutoff Results"]
         q3_table = create_table(q3_results)
         pdf_canvas, y = draw_table(pdf_canvas, q3_table, 50, y, q3_header)
 
@@ -752,5 +785,7 @@ class BanffLesionScore:
             None
         """
         # Generate the report and upload it to the output folder
-        report_path = self.generate_report()
-        self.gc.uploadFileToFolder(self.results_folder, report_path)
+        # report_path = self.generate_report()
+        # self.gc.uploadFileToFolder(self.results_folder, report_path)
+        cv_stuff = self.compute_cv()
+        print(f"Ha! It worked! cv_stuff = {cv_stuff}")
