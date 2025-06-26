@@ -28,6 +28,7 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
+
 from skimage.color import rgb2hsv
 from skimage.filters import gaussian
 from sklearn.neighbors import KDTree
@@ -693,6 +694,25 @@ def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> dict[str, An
         annotation_data[ann_name] = ann_coordinates
 
     return annotation_data
+
+
+def get_mounted_path_from_file_id(file_id: str) -> str:
+    """Map a Girder file ID to its mounted local path using manifest.json."""
+    import json
+    import os
+
+    manifest_path = "/mnt/girder_worker/manifest.json"
+    if not os.path.exists(manifest_path):
+        raise FileNotFoundError("manifest.json not found in /mnt/girder_worker")
+
+    with open(manifest_path, "r") as f:
+        manifest = json.load(f)
+
+    for entry in manifest.get("inputs", {}).values():
+        if entry.get("id") == file_id:
+            return entry["path"]
+
+    raise ValueError(f"File ID {file_id} not found in manifest.json")
 
 
 def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tuple[float, float]:
