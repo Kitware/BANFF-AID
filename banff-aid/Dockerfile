@@ -20,12 +20,7 @@ COPY . $MY_PLUGIN_PATH
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir . --find-links https://girder.github.io/large_image_wheels && \
     rm -rf /root/.cache/pip/* && apt-get update && apt-get install -y gcc python3-dev git &&\
-    pip install --no-cache-dir cython && rm -rf /var/lib/apt/lists/*
-
-# Install detectron2 here using '--no-build-isolation' flag. Installing in 
-# pyproject.toml leads to issues with the build because it can't detect dependencies. 
-RUN pip install --no-build-isolation \
-       git+https://github.com/facebookresearch/detectron2.git@v0.6#egg=detectron2 
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR $MY_PLUGIN_PATH/banff-aid/cli
 

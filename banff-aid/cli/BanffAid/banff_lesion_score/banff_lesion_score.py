@@ -36,7 +36,6 @@ from utils.utils import (
     draw_plot,
     draw_table,
     draw_text,
-    get_mounted_path_from_file_id,
     fetch_annotations,
     fetch_mpp,
     get_boundaries,
@@ -87,9 +86,8 @@ class BanffLesionScore:
             credentials, image file ID, annotation filenames, and results folder ID.
         """
         # Image and folder
-        self.image_id = args.image_id
         self.results_folder = args.results_folder
-        self.image_style = args.image_style
+        self.image_id = args.image_id
         self.image_filepath = args.image_filepath
 
         # Girder Client Instantiation
@@ -108,9 +106,10 @@ class BanffLesionScore:
     def cortex_structures(self, boundary: tuple[float, float, float, float]) -> list[dict[str, Any]]:
         """Extract annotated structures overlapping a cortex region.
 
-        Iterates through artery, globally sclerotic glomerulus, non-sclerotic glomerulus,
-        and tubule annotations, selects those whose polygons overlap `boundary`, computes
-        centroids, assigns a type and unique index, and returns them.
+        Iterates through artery, globally sclerotic glomerulus, non-sclerotic
+        glomerulus, and tubule annotations, selects those whose polygons overlap
+        `boundary`, computes centroids, assigns a type and unique index, and returns
+        them.
 
         Args:
             boundary (tuple[float, float, float, float]): (xmin, xmax, ymin, ymax)
@@ -381,27 +380,11 @@ class BanffLesionScore:
                 - Number of Arteries Evaluated
         """
         # We must first source the input image using large_image
-        # print(f"self.image_id = {self.image_id}")
-        # print(f"self.image_id_index = {self.image_filepath}")
-        # print(f"Getting the filepath:")
-        # image_info = self.gc.get(f"file/{self.image_id}")
-        # for thing, stuff in image_info.items():
-        #     print(f"Key: {thing}\nValue: {stuff}")
-        # try:
-        #     item_id = self.gc.get(f"file/{self.image_id}")["itemId"]
-        #     # source = large_image.open({"_id": item_id, "girder": True, "style": self.image_style})
-        #     source = large_image.getTileSource(item_id)
-        #     print("This is option one.")
-        # except:
-        #     source = large_image.getTileSource(self.image_filepath)
-        #     print("This is option two.")
+        source = large_image.open(self.image_filepath)
 
-        # Warning: This doesn't work! BUG
-        source = large_image.getTileSource(self.image_id, style=self.image_style)
         # We now iterate through all arteries in the given slide, computing arterial
         # luminal loss for each one
         artery_summaries: list[dict[str, Any]] = []
-        print(f"Here it is! self.arteries_annotation = {self.arteries_annotation}")
         for artery in self.arteries_annotation["annotation"]["elements"]:
             xmin, xmax, ymin, ymax = get_boundaries(artery)
 
@@ -448,7 +431,7 @@ class BanffLesionScore:
             except ValueError as e:
                 artery_centroid = compute_polygon_centroid(artery["points"])
                 artery_centroid = (int(artery_centroid[0]), int(artery_centroid[1]))
-                print(f"Warning: Failed to build luminal mask at {artery_centroid}:" f"'{e}' Artery ignored.")
+                print(f"Warning: Failed to build luminal mask at {artery_centroid}: '{e}' Artery ignored.")
 
                 continue
 
@@ -619,17 +602,17 @@ class BanffLesionScore:
 
         # Print a table of Q1 results
         q1_results = ci_results.get("No Cutoff", "")
-        q1_header = ["Results with No Cutoff"]
+        q1_header = ["Results With No Cutoff"]
         q1_table = create_table(q1_results)
         pdf_canvas, y = draw_table(pdf_canvas, q1_table, 50, y, q1_header)
         # Print a table of Q2 results
-        q2_results = ci_results.get("Median Value", "")
-        q2_header = ["Median Value Cutoff Results"]
+        q2_results = ci_results.get("Median", "")
+        q2_header = ["Results With Cutoff at Median"]
         q2_table = create_table(q2_results)
         pdf_canvas, y = draw_table(pdf_canvas, q2_table, 50, y, q2_header)
         # Print a table of Q3 results
         q3_results = ci_results.get("Third Quartile", "")
-        q3_header = ["Third Quartile Cutoff Results"]
+        q3_header = ["Results With Cutoff at Third Quartile"]
         q3_table = create_table(q3_results)
         pdf_canvas, y = draw_table(pdf_canvas, q3_table, 50, y, q3_header)
 
@@ -785,7 +768,5 @@ class BanffLesionScore:
             None
         """
         # Generate the report and upload it to the output folder
-        # report_path = self.generate_report()
-        # self.gc.uploadFileToFolder(self.results_folder, report_path)
-        cv_stuff = self.compute_cv()
-        print(f"Ha! It worked! cv_stuff = {cv_stuff}")
+        report_path = self.generate_report()
+        self.gc.uploadFileToFolder(self.results_folder, report_path)
