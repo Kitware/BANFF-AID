@@ -440,13 +440,13 @@ def create_histogram(
 
     # Titles and Labels
     if title:
-        ax.set_title(title, fontsize=10, fontweight="bold")
+        ax.set_title(title, fontsize=8, fontweight="bold")
     if xlab:
-        ax.set_xlabel(xlab, fontsize=9)
+        ax.set_xlabel(xlab, fontsize=7)
     if ylab:
-        ax.set_ylabel(ylab, fontsize=9)
+        ax.set_ylabel(ylab, fontsize=7)
 
-    ax.legend(fontsize=9, frameon=True)
+    ax.legend(fontsize=7, frameon=True)
     ax.tick_params(axis="both", which="major", labelsize=9)
 
     # Tight layout so labels don’t get cut off
