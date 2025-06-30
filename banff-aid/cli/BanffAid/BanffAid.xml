@@ -20,18 +20,18 @@
     </directory>
     <image reference="_girder_id_" defaultRelativePath="..">
       <name>image_id</name>
-      <label>Input Image</label>
+      <label>Input Image ID</label>
       <channel>input</channel>
       <longflag>image-id</longflag> 
-      <description>Path to slide image with annotations</description>
+      <description>ID for the primary image used for analysis</description>
     </image> 
-    <image reference="image_id">
+    <image>
       <name>image_filepath</name>
-      <label>Input Image</label>
-      <channel>output</channel>
-      <index>0</index>
-      <description>Input image for which Banff lesions scores are computed</description>
-    </image>
+      <label>Input Image Filepath</label>
+      <channel>input</channel>
+      <longflag>image-filepath</longflag> 
+      <description>File path for the primary image used for analysis</description>
+    </image> 
   </parameters>
   
   <parameters advanced="true">
@@ -43,13 +43,6 @@
       <label>Girder API URL</label>
       <description>A Girder API URL</description>
       <default>http://girder:8080/api/v1</default>
-    </string>
-    <string>
-      <name>image_style</name>
-      <longflag>image_style</longflag>
-      <label>Style Options</label>
-      <description>Image style options for compositing a multi-frame image</description>
-      <default>{#control:#current_image_style#}</default>
     </string>
   </parameters>
 

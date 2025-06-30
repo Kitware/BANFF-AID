@@ -41,7 +41,6 @@ dependencies = [
     "scipy==1.15.2",
     "scikit-image==0.25.2",
     "svglib==1.5.1",
-    "torch==2.6.0",
 ]
 [project.urls]
 "Repository" = "https://github.com/Kitware/BANFF-AID"
