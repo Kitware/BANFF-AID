@@ -4,34 +4,32 @@ FROM dsarchive/histomicstk:latest
 LABEL maintainer="Austin Allen <austin.allen@kitware.com>"
 
 # Create a directory for your plugin code
-ENV MY_PLUGIN_PATH=/combined-lesion-scores
+ENV MY_PLUGIN_PATH=/plugin
 RUN mkdir -p $MY_PLUGIN_PATH
 WORKDIR $MY_PLUGIN_PATH
 
 # Install libgl1 for OpenCV
 RUN apt-get update && apt-get install -y libgl1-mesa-glx
 
-# Copy plugin code. The '.' in COPY must be the directory
-# that contains your plugin code on the host.
+# Copy the entire repository (now including pyproject.toml) into the container.
+# When building, set the context to the repository root.
+# COPY pyproject.toml $MY_PLUGIN_PATH/
 COPY . $MY_PLUGIN_PATH
 
-# Install plugin (plus any extras). In many cases
-# --find-links is used for large_image wheels.
+# Upgrade pip and setuptools and install the package using pyproject.toml as source
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir . --find-links https://girder.github.io/large_image_wheels && \
-    rm -rf /root/.cache/pip/*
+    rm -rf /root/.cache/pip/* && apt-get update && apt-get install -y gcc python3-dev git &&\
+    rm -rf /var/lib/apt/lists/*
 
-# Switch to the CLI directory 
-WORKDIR $MY_PLUGIN_PATH/cli   
+WORKDIR $MY_PLUGIN_PATH/banff-aid/cli
 
-# Optionally show that your new CLI is recognized
+# Ensure your new CLI is recognized
 RUN python -m slicer_cli_web.cli_list_entrypoint --list_cli
 
 # If you want to see the help of your new CLI
-RUN python -m slicer_cli_web.cli_list_entrypoint \
-        BanffAid --help
+RUN python -m slicer_cli_web.cli_list_entrypoint BanffAid --help
 
-# For demonstration, let's set the entrypoint to a shell
-# that has your plugin code installed. You can adapt this
-# to match how your environment typically runs.
+# Set the entrypoint to a shell that has your plugin code installed
 ENTRYPOINT ["/bin/bash", "docker-entrypoint.sh"]
+
