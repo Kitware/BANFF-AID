@@ -20,11 +20,12 @@ from typing import Any
 import large_image
 import numpy as np
 from PIL import Image, ImageDraw
+from docx import Document
 from girder_client import GirderClient
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen.canvas import Canvas
 from slicer_cli_web import CLIArgumentParser
 from utils.utils import (
+    add_docx_figure,
+    add_docx_table,
     ci_threshold,
     cv_threshold,
     compute_max_distance,
@@ -32,10 +33,6 @@ from utils.utils import (
     compute_polygon_centroid,
     convert_to_microns,
     create_histogram,
-    create_table,
-    draw_plot,
-    draw_table,
-    draw_text,
     fetch_annotations,
     fetch_mpp,
     get_boundaries,
@@ -241,34 +238,42 @@ class BanffLesionScore:
             structures = ctx_section["structures"]
             for struct in structures:
                 points = struct["points"]
-                # normal_q1 += shoelace_area(points)
+                normal_q1 += shoelace_area(points)
+
+        # We convert area units from pixels to microns
+        mpp_x, mpp_y = fetch_mpp(self.gc, self.image_id)
+        normal_q1 = normal_q1 * mpp_x * mpp_y
+        normal_q2 = normal_q2 * mpp_x * mpp_y
+        normal_q3 = normal_q3 * mpp_x * mpp_y
+        fibrosis_q1 = fibrosis_q1 * mpp_x * mpp_y
+        fibrosis_q2 = fibrosis_q2 * mpp_x * mpp_y
+        fibrosis_q3 = fibrosis_q3 * mpp_x * mpp_y
 
         # Compute proportions of fibrotic tissue
-        prop_q1 = fibrosis_q1 / (fibrosis_q1 + normal_q1)
+        prop_q1 = fibrosis_q1 / normal_q1
         prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
         prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
 
         ci_score = {
             "No Cutoff": {
-                "Cutoff": "None",
-                "Normal Area": round(normal_q1),
-                "Fibrosis Area": round(fibrosis_q1),
+                "Normal Area": f"{round(normal_q1)} microns^2",
+                "Fibrosis Area": f"{round(fibrosis_q1)} microns^2",
                 "Proportion of Fibrosis": round(prop_q1, 3),
                 "ci Score (Discrete)": ci_threshold(prop_q1, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q1, discrete=False), 3),
             },
             "Median": {
-                "Cutoff": round(q2, 1),
-                "Normal Area": round(normal_q2),
-                "Fibrosis Area": round(fibrosis_q2),
+                "Median Value": round(q2, 1),
+                "Normal Area": f"{round(normal_q2)} microns^2",
+                "Fibrosis Area": f"{round(fibrosis_q2)} microns^2",
                 "Proportion of Fibrosis": round(prop_q2, 3),
                 "ci Score (Discrete)": ci_threshold(prop_q2, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q2, discrete=False), 3),
             },
             "Third Quartile": {
-                "Cutoff": round(q3, 1),
-                "Normal Area": round(normal_q3),
-                "Fibrosis Area": round(fibrosis_q3),
+                "Third Quartile": round(q3, 1),
+                "Normal Area": f"{round(normal_q3)} microns^2",
+                "Fibrosis Area": f"{round(fibrosis_q3)} microns^2",
                 "Proportion of Fibrosis": round(prop_q3, 3),
                 "ci Score (Discrete)": ci_threshold(prop_q3, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q3, discrete=False), 3),
@@ -567,149 +572,154 @@ class BanffLesionScore:
             "95% Confidence Interval For GS %": confidence_interval,
         }
 
-    def draw_ci(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
-        """Draw interstitial fibrosis (ci) section on the PDF report.
+    # def draw_ci(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
+    #     """Draw interstitial fibrosis (ci) section on the PDF report.
 
-        This method calls the compute_ci() function and formats its results as
-        a list of lines. The content is then drawn on the provided ReportLab
-        canvas at the specified (x, y) position.
+    #     This method calls the compute_ci() function and formats its results as
+    #     a list of lines. The content is then drawn on the provided ReportLab
+    #     canvas at the specified (x, y) position.
 
-        Args:
-            pdf_canvas (Canvas): The ReportLab canvas to draw on.
-            x (float): The x-coordinate where text should begin.
-            y (float): The current y-coordinate for text placement.
+    #     Args:
+    #         pdf_canvas (Canvas): The ReportLab canvas to draw on.
+    #         x (float): The x-coordinate where text should begin.
+    #         y (float): The current y-coordinate for text placement.
 
-        Returns:
-            tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
-        """
-        # Start with a section header
-        section_header = ["Interstitial Fibrosis:"]
-        pdf_canvas, y = draw_text(pdf_canvas, x, y, section_header)
-        ci_results = self.compute_ci()
+    #     Returns:
+    #         tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
+    #     """
+    #     # Start with a section header
+    #     section_header = ["Interstitial Fibrosis:"]
+    #     pdf_canvas, y = draw_text(pdf_canvas, x, y, section_header)
+    #     ci_results = self.compute_ci()
 
-        # Plot histogram of edges
-        edges = ci_results.pop("Edge Lengths", None)
-        med_val = np.median(edges)
-        fig = create_histogram(
-            edges,
-            "Distances Between Cortex Structures",
-            "Edge Distance",
-            "Count",
-            med_val,
-            "Median Value",
-        )
-        pdf_canvas, y = draw_plot(pdf_canvas, fig, 50, y)
+    #     # Plot histogram of edges
+    #     edges = ci_results.pop("Edge Lengths", None)
+    #     med_val = np.median(edges)
+    #     fig = create_histogram(
+    #         edges,
+    #         "Distances Between Cortex Structures",
+    #         "Edge Distance",
+    #         "Count",
+    #         med_val,
+    #         "Median Value",
+    #     )
+    #     pdf_canvas, y = draw_plot(pdf_canvas, fig, 50, y)
 
-        # Print a table of Q1 results
-        q1_results = ci_results.get("No Cutoff", "")
-        q1_header = ["Results With No Cutoff"]
-        q1_table = create_table(q1_results)
-        pdf_canvas, y = draw_table(pdf_canvas, q1_table, 50, y, q1_header)
-        # Print a table of Q2 results
-        q2_results = ci_results.get("Median", "")
-        q2_header = ["Results With Cutoff at Median"]
-        q2_table = create_table(q2_results)
-        pdf_canvas, y = draw_table(pdf_canvas, q2_table, 50, y, q2_header)
-        # Print a table of Q3 results
-        q3_results = ci_results.get("Third Quartile", "")
-        q3_header = ["Results With Cutoff at Third Quartile"]
-        q3_table = create_table(q3_results)
-        pdf_canvas, y = draw_table(pdf_canvas, q3_table, 50, y, q3_header)
+    #     # Print a table of Q1 results
+    #     q1_results = ci_results.get("No Cutoff", "")
+    #     q1_header = ["Results With No Cutoff"]
+    #     q1_table = create_table(q1_results)
+    #     pdf_canvas, y = draw_table(pdf_canvas, q1_table, 50, y, q1_header)
+    #     # Print a table of Q2 results
+    #     q2_results = ci_results.get("Median", "")
+    #     q2_header = ["Results With Cutoff at Median"]
+    #     q2_table = create_table(q2_results)
+    #     pdf_canvas, y = draw_table(pdf_canvas, q2_table, 50, y, q2_header)
+    #     # Print a table of Q3 results
+    #     q3_results = ci_results.get("Third Quartile", "")
+    #     q3_header = ["Results With Cutoff at Third Quartile"]
+    #     q3_table = create_table(q3_results)
+    #     pdf_canvas, y = draw_table(pdf_canvas, q3_table, 50, y, q3_header)
 
-        return pdf_canvas, y
+    #     return pdf_canvas, y
 
-    def draw_ct(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
-        """Draw tubular atrophy (ct) section on the PDF report.
+    # def draw_ct(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
+    #     """Draw tubular atrophy (ct) section on the PDF report.
 
-        This method calls compute_ct() to calculate atrophy metrics and then
-        renders two components on the report:
-            - A summary table of key ct metrics (e.g., IQR, atrophy %, score)
-            - A histogram of tubule diameters with an overlaid atrophy threshold
+    #     This method calls compute_ct() to calculate atrophy metrics and then
+    #     renders two components on the report:
+    #         - A summary table of key ct metrics (e.g., IQR, atrophy %, score)
+    #         - A histogram of tubule diameters with an overlaid atrophy threshold
 
-        The content is drawn sequentially on the provided canvas, and the
-        y-coordinate is updated after each visual element.
+    #     The content is drawn sequentially on the provided canvas, and the
+    #     y-coordinate is updated after each visual element.
 
-        Args:
-            pdf_canvas (Canvas): The ReportLab canvas to draw on.
-            x (float): The x-coordinate where the table and plot should begin.
-            y (float): The current y-coordinate for placement.
+    #     Args:
+    #         pdf_canvas (Canvas): The ReportLab canvas to draw on.
+    #         x (float): The x-coordinate where the table and plot should begin.
+    #         y (float): The current y-coordinate for placement.
 
-        Returns:
-            tuple[Canvas, float]: The updated canvas and y-coordinate after drawing.
-        """
-        ct_results = self.compute_ct()
-        ct_text = ["Tubular Atrophy:"]
-        pdf_canvas, y = draw_text(pdf_canvas, x, y, ct_text)
+    #     Returns:
+    #         tuple[Canvas, float]: The updated canvas and y-coordinate after drawing.
+    #     """
+    #     ct_results = self.compute_ct()
+    #     ct_text = ["Tubular Atrophy:"]
+    #     pdf_canvas, y = draw_text(pdf_canvas, x, y, ct_text)
 
-        # Create histogram for diameters
-        diameters = ct_results.pop("Tubule Diameters", None)
-        threshold = (
-            ct_results["Diamter Length at 80th Percentile"] - 0.5 * ct_results["Diamter Length at 80th Percentile"]
-        )
-        fig = create_histogram(
-            diameters,
-            "Tubular Diameters",
-            "Diameter (microns)",
-            "Count",
-            threshold,
-            "Atropy Threshold",
-        )
-        pdf_canvas, y = draw_plot(pdf_canvas, fig, x, y)
+    #     # Create histogram for diameters
+    #     diameters = ct_results.pop("Tubule Diameters", None)
+    #     threshold = (
+    #         ct_results["Diamter Length at 80th Percentile"]
+    #         - 0.5 * ct_results["Diamter Length at 80th Percentile"]
+    #     )
+    #     fig = create_histogram(
+    #         diameters,
+    #         "Tubular Diameters",
+    #         "Diameter (microns)",
+    #         "Count",
+    #         threshold,
+    #         "Atropy Threshold",
+    #     )
+    #     pdf_canvas, y = draw_plot(pdf_canvas, fig, x, y)
 
-        # Create summary table
-        ct_table = create_table(ct_results)
-        pdf_canvas, y = draw_table(pdf_canvas, ct_table, x, y, ["Summary of Tubular Atropy"])
+    #     # Create summary table
+    #     ct_table = create_table(ct_results)
+    #     pdf_canvas, y = draw_table(
+    #         pdf_canvas, ct_table, x, y, ["Summary of Tubular Atropy"]
+    #     )
 
-        return pdf_canvas, y
+    #     return pdf_canvas, y
 
-    def draw_cv(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
-        """Draw vascular intimal thickening (cv) section on the PDF report.
+    # def draw_cv(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
+    #     """Draw vascular intimal thickening (cv) section on the PDF report.
 
-        This method calls compute_cv() and formats the returned results as a
-        block of text. The output is drawn onto the provided ReportLab canvas
-        at the specified (x, y) position.
+    #     This method calls compute_cv() and formats the returned results as a
+    #     block of text. The output is drawn onto the provided ReportLab canvas
+    #     at the specified (x, y) position.
 
-        Args:
-            pdf_canvas (Canvas): The canvas to draw the text on.
-            x (float): The starting x-coordinate for the text block.
-            y (float): The current y-coordinate to begin drawing.
+    #     Args:
+    #         pdf_canvas (Canvas): The canvas to draw the text on.
+    #         x (float): The starting x-coordinate for the text block.
+    #         y (float): The current y-coordinate to begin drawing.
 
-        Returns:
-            tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
-        """
-        cv_results = self.compute_cv()
-        cv_text = ["Vascular Intimal Thickening:"]
-        pdf_canvas, y = draw_text(pdf_canvas, x, y, cv_text)
+    #     Returns:
+    #         tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
+    #     """
+    #     cv_results = self.compute_cv()
+    #     cv_text = ["Vascular Intimal Thickening:"]
+    #     pdf_canvas, y = draw_text(pdf_canvas, x, y, cv_text)
 
-        # Create summary table
-        cv_table = create_table(cv_results)
-        pdf_canvas, y = draw_table(pdf_canvas, cv_table, x, y, ["Summary of Vascular Intimal Thickening"])
+    #     # Create summary table
+    #     cv_table = create_table(cv_results)
+    #     pdf_canvas, y = draw_table(
+    #         pdf_canvas, cv_table, x, y, ["Summary of Vascular Intimal Thickening"]
+    #     )
 
-        return pdf_canvas, y
+    #     return pdf_canvas, y
 
-    def draw_gs(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
-        """Draw glomerulosclerosis (gs) section on the PDF report.
+    # def draw_gs(self, pdf_canvas: Canvas, x: float, y: float) -> tuple[Canvas, float]:
+    #     """Draw glomerulosclerosis (gs) section on the PDF report.
 
-        This method calls compute_gs() to retrieve counts, percentages, and
-        confidence intervals related to glomerular sclerosis. The results are
-        formatted into a summary table and rendered on the PDF canvas at the
-        given (x, y) position.
+    #     This method calls compute_gs() to retrieve counts, percentages, and
+    #     confidence intervals related to glomerular sclerosis. The results are
+    #     formatted into a summary table and rendered on the PDF canvas at the
+    #     given (x, y) position.
 
-        Args:
-            pdf_canvas (Canvas): The canvas to draw the table on.
-            x (float): The x-coordinate for table placement.
-            y (float): The current y-coordinate for drawing.
+    #     Args:
+    #         pdf_canvas (Canvas): The canvas to draw the table on.
+    #         x (float): The x-coordinate for table placement.
+    #         y (float): The current y-coordinate for drawing.
 
-        Returns:
-            tuple[Canvas, float]: The updated canvas and y-coordinate after drawing.
-        """
-        gs_results = self.compute_gs()
-        gs_text = ["Glomerulosclerosis:"]
-        gs_table = create_table(gs_results)
+    #     Returns:
+    #         tuple[Canvas, float]: The updated canvas and y-coordinate after drawing.
+    #     """
+    #     gs_results = self.compute_gs()
+    #     gs_text = ["Glomerulosclerosis:"]
+    #     gs_table = create_table(gs_results)
 
-        pdf_canvas, y = draw_table(pdf_canvas, gs_table, x, y, gs_text)
+    #     pdf_canvas, y = draw_table(pdf_canvas, gs_table, x, y, gs_text)
 
-        return pdf_canvas, y
+    #     return pdf_canvas, y
 
     def generate_report(self) -> str:
         """Generate and save the full PDF report of Banff lesion scores.
@@ -725,37 +735,90 @@ class BanffLesionScore:
         Returns:
             str: The file path of the generated PDF report.
         """
-        # Set title and timestamp for report
-        date = datetime.now()
-        report_title = [
-            "BANFF-AID",
-            "Banff Lesion Scores Report",
-            date.strftime("Report Timestamp: %Y-%m-%d %H:%M:%S"),
-        ]
-
-        # Create Canvas object and begin drawing
-        x, y = 50, letter[1] - 50
-        path = "BANFF-AID Report.pdf"
-        pdf_canvas = Canvas(path, pagesize=letter)
-        pdf_canvas, y = draw_text(pdf_canvas, x, y, report_title, centered=True, font_size=16)
-
-        # Begin adding results from each of the Banff lesion scores
+        # Prepare document with title and timestamp
+        path = "BANFF-AID Report.docx"
+        doc = Document()
+        timestamp = datetime.now().strftime("Report Timestamp: %Y-%m-%d %H:%M:%S")
+        doc.add_heading("BANFF-AID", level=0)
+        doc.add_heading(f"{timestamp}", level=1)
 
         # Interstitial Fibrosis
-        pdf_canvas, y = self.draw_ci(pdf_canvas, x, y)
+        doc.add_heading("Interstitial Fibrosis")
+        ci_results = self.compute_ci()
 
-        # Tubular Atrophy
-        pdf_canvas, y = self.draw_ct(pdf_canvas, x, y)
+        # Add figure of edge lengths between polygons
+        edges = ci_results.pop("Edge Lengths", None)
+        med_val = np.median(edges)
+        fig = create_histogram(
+            edges,
+            "Distances Between Cortex Structures",
+            "Edge Distance",
+            "Count",
+            med_val,
+            "Median Value",
+        )
+        doc = add_docx_figure(doc, fig)
+
+        # Add tables
+        doc = add_docx_table(
+            doc,
+            ci_results["No Cutoff"],
+            table_title="Summary: No Cutoff Used for Analysis",
+        )
+        doc = add_docx_table(
+            doc,
+            ci_results["Median"],
+            table_title="Summary: Median Value Used as Cutoff for Fibrosis",
+        )
+        doc = add_docx_table(
+            doc,
+            ci_results["Third Quartile"],
+            table_title="Summary: Third Quartile Used as Cutoff for Fibrosis",
+        )
 
         # Vascular Intimal Thickening
-        pdf_canvas, y = self.draw_cv(pdf_canvas, x, y)
+        doc.add_heading("Vascular Intimal Thickening")
+        cv_results = self.compute_cv()
+        doc = add_docx_table(doc, cv_results, table_title="Summary: Vascular Results")
 
         # Glomerulosclerosis
-        pdf_canvas, y = self.draw_gs(pdf_canvas, x, y)
-
-        pdf_canvas.save()
+        doc.add_heading("Glomerulosclerosis")
+        gs_results = self.compute_gs()
+        doc = add_docx_table(doc, gs_results, table_title="Summary: Analysis of Glomeruli")
+        doc.save(path)
 
         return path
+        # # Set title and timestamp for report
+        # date = datetime.now()
+        # report_title = [
+        #     "BANFF-AID",
+        #     "Banff Lesion Scores Report",
+        #     date.strftime("Report Timestamp: %Y-%m-%d %H:%M:%S"),
+        # ]
+
+        # # Create Canvas object and begin drawing
+        # x, y = 50, letter[1] - 50
+        # path = "BANFF-AID Report.pdf"
+        # pdf_canvas = Canvas(path, pagesize=letter)
+        # pdf_canvas, y = draw_text(
+        #     pdf_canvas, x, y, report_title, centered=True, font_size=16
+        # )
+
+        # # Begin adding results from each of the Banff lesion scores
+
+        # # Interstitial Fibrosis
+        # pdf_canvas, y = self.draw_ci(pdf_canvas, x, y)
+
+        # # Tubular Atrophy
+        # pdf_canvas, y = self.draw_ct(pdf_canvas, x, y)
+
+        # # Vascular Intimal Thickening
+        # pdf_canvas, y = self.draw_cv(pdf_canvas, x, y)
+
+        # # Glomerulosclerosis
+        # pdf_canvas, y = self.draw_gs(pdf_canvas, x, y)
+
+        # pdf_canvas.save()
 
     def main(self) -> None:
         """Run the full BANFF-AID pipeline and upload the PDF report to Girder.
