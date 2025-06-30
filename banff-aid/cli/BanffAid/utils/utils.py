@@ -16,23 +16,111 @@ lesion scores, visualize pathology results, and generate a structured PDF
 report for renal biopsy whole slide images.
 """
 
+import io
 import math
-import textwrap
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndi
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches
 from girder_client import GirderClient
 from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen.canvas import Canvas
-
 from skimage.color import rgb2hsv
 from skimage.filters import gaussian
 from sklearn.neighbors import KDTree
 from slicer_cli_web import CLIArgumentParser
+
+
+def add_docx_figure(doc: Document, fig: Figure) -> Document:
+    """Inserts a matplotlib figure into a python-docx Document.
+
+    The figure is saved to an in-memory PNG stream, added to the
+    document as an image with a fixed width of 5 inches, and centered
+    on the page.
+
+    Args:
+        doc (Document): A python-docx Document object to modify.
+        fig (Figure): A matplotlib figure to embed in the document.
+
+    Returns:
+        Document: The updated Document with the added figure.
+    """
+    # Create an in-memory buffer to temporarily save the figure
+    img_stream = io.BytesIO()
+    fig.savefig(img_stream, format="png")
+    img_stream.seek(0)
+
+    # Add image from buffer to the document
+    paragraph = doc.add_paragraph()
+    run = paragraph.add_run()
+    run.add_picture(img_stream, width=Inches(5))
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Close the i/o stream
+    img_stream.close()
+
+    return doc
+
+
+def add_docx_table(
+    doc: Document,
+    table_info: dict[str, Any],
+    table_title: str = "",
+    headers: list[str] = ["Item", "Value"],
+) -> Document:
+    """Adds a table to a python-docx Document using provided data.
+
+    Optionally includes a title row and custom headers. The table is
+    styled using the built-in 'Table Grid' style.
+
+    Args:
+        doc (Document): A python-docx Document object to modify.
+        table_info (dict[str, Any]): Dictionary of key-value pairs to
+            populate the table rows.
+        table_title (str, optional): Optional title for the table. If
+            provided, it spans all columns. Defaults to "".
+        headers (list[str], optional): List of column headers. Must
+            match the number of columns. Defaults to ["Item", "Value"].
+
+    Returns:
+        Document: The updated Document with the inserted table.
+    """
+    title_adjst = 1 if table_title else 0
+    num_cols = len(headers)
+    num_rows = len(list(table_info.keys())) + title_adjst
+    table = doc.add_table(rows=num_rows + 1, cols=num_cols)
+    table.style = "Table Grid"
+
+    # Add title, if included
+    if table_title:
+        # Merge top row
+        title_cell = table.cell(0, 0)
+        for i in range(1, len(headers)):
+            title_cell.merge(table.cell(0, i))
+
+        # Add title text and center it
+        title_paragraph = title_cell.paragraphs[0]
+        title_run = title_paragraph.add_run(table_title)
+        title_run.bold = True
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Add headers to the first row and make them bold
+    for i, header in enumerate(headers):
+        cell = table.cell(0 + title_adjst, i)
+        paragraph = cell.paragraphs[0]
+        run = paragraph.add_run(header)
+        run.bold = True
+
+    # Add the rest of the data
+    for j, (key, value) in enumerate(table_info.items()):
+        table.cell(j + 1 + title_adjst, 0).text = str(key)
+        table.cell(j + 1 + title_adjst, 1).text = str(value)
+
+    return doc
 
 
 def ci_threshold(proportion: float, discrete: bool = True) -> float | int:
@@ -350,282 +438,21 @@ def create_histogram(
             label=f"{linelab} = {vline:.2f}",
         )
 
-    # Titles and labels
+    # Titles and Labels
     if title:
-        ax.set_title(title, fontsize=13, fontweight="bold")
+        ax.set_title(title, fontsize=10, fontweight="bold")
     if xlab:
-        ax.set_xlabel(xlab, fontsize=12)
+        ax.set_xlabel(xlab, fontsize=9)
     if ylab:
-        ax.set_ylabel(ylab, fontsize=12)
+        ax.set_ylabel(ylab, fontsize=9)
 
-    # Legend
-    ax.legend(fontsize=12, frameon=True)
-
-    # Tweak tick params for readability
-    ax.tick_params(axis="both", which="major", labelsize=12)
+    ax.legend(fontsize=9, frameon=True)
+    ax.tick_params(axis="both", which="major", labelsize=9)
 
     # Tight layout so labels don’t get cut off
     plt.tight_layout()
 
     return fig
-
-
-def create_table(
-    items: dict[str, Any],
-    key_column: str = "Item",
-    value_column: str = "Value",
-    fontsize: int = 10,
-    scale: tuple[float, float] = (0.75, 0.75),
-    wrap_width: int = 25,
-    col_widths: tuple[float, float] = (0.1, 0.1),
-) -> plt.Figure:
-    """Create a matplotlib Figure containing a two-column summary table.
-
-    This function generates a simple key-value table from a dictionary,
-    suitable for embedding into PDF reports. Text wrapping, font sizing,
-    and cell dimensions are configurable.
-
-    Args:
-        items (dict[str, Any]): A mapping of labels to values for each row.
-        key_column (str): Header text for the key/label column.
-        value_column (str): Header text for the value column.
-        fontsize (int): Font size used in the table.
-        scale (tuple[float, float]): Scale factors for table width and height.
-        wrap_width (int): Approximate character width at which to wrap cell text.
-        col_widths (tuple[float, float]): Relative widths of the two columns.
-
-    Returns:
-        matplotlib.figure.Figure: A figure object containing the rendered table.
-    """
-    # Pre-wrap your text
-    wrapped_keys = [textwrap.fill(str(k), wrap_width) for k in items]
-    wrapped_vals = [textwrap.fill(str(v), wrap_width) for v in items.values()]
-
-    cell_data = list(zip(wrapped_keys, wrapped_vals))
-    col_labels = [key_column, value_column]
-
-    # Make figure + hide axes
-    plt.margins(x=0, y=0)
-    fig, ax = plt.subplots()
-    ax.axis("off")
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-
-    # Create table with forced column widths
-    table = ax.table(
-        cellText=cell_data,
-        colLabels=col_labels,
-        colWidths=col_widths,
-        bbox=[0, 0, 0.75, 0.75],
-        loc="center",
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(fontsize)
-    table.scale(*scale)
-
-    # Bold only the header row
-    for (row, _), cell in table.get_celld().items():
-        text = cell.get_text()
-        text.set_wrap(True)
-        if row == 0:
-            text.set_fontweight("bold")
-
-    return fig
-
-
-def draw_plot(
-    pdf_canvas: Canvas,
-    fig: plt.Figure,
-    x: float,
-    y: float,
-) -> tuple[Canvas, float]:
-    """Draw a Matplotlib figure onto a ReportLab PDF canvas.
-
-    This function embeds a Matplotlib figure onto the given canvas by
-    rendering it as a vector graphic (SVG). The figure is automatically
-    centered horizontally on the page, and vertical placement is adjusted
-    based on the figure height. If there is insufficient space on the
-    current page, a new page is created.
-
-    Args:
-        pdf_canvas (Canvas): The ReportLab Canvas to draw on.
-        fig (matplotlib.figure.Figure): The Matplotlib figure to render.
-        x (float): The starting x-coordinate (overridden to center the image).
-        y (float): The current y-coordinate to begin drawing from.
-
-    Returns:
-        tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
-    """
-    from io import BytesIO
-
-    from reportlab.graphics import renderPDF
-    from svglib.svglib import svg2rlg
-
-    # Adjust x to be centered
-    dpi = fig.get_dpi()
-    x = (letter[0] - fig.get_figwidth() * dpi) / 2 + fig.get_figwidth() * 8
-
-    # Adjust y to be at the bottom of the image
-    fig_height = fig.get_figheight() * dpi
-    y = y - fig_height
-
-    # Draw the figure as a vector image
-    imgdata = BytesIO()
-    fig.savefig(imgdata, format="svg")
-    imgdata.seek(0)
-    vector_drawing = svg2rlg(imgdata)
-
-    # Before drawing, we need to check that there's room to draw. if not,
-    # create a new page
-    needed_space = fig_height / 1.5 + 14
-    if y - needed_space < 50:
-        pdf_canvas, y = draw_new_page(pdf_canvas)
-        y = y - fig_height
-
-    renderPDF.draw(vector_drawing, pdf_canvas, x=x, y=y)
-
-    return pdf_canvas, y - 14 * 4  # Adjust the y value by height of four lines
-
-
-def draw_text(
-    pdf_canvas: Canvas,
-    x: float,
-    y: float,
-    lines: list[str],
-    centered: bool = False,
-    line_height: float = 14.0,
-    font_size: float = 12.0,
-) -> float:
-    """Draw multiple lines of text onto a ReportLab Canvas object.
-
-    The first line is drawn in bold, and all subsequent lines use a
-    standard font. Optionally centers each line of text relative to the
-    page width. Returns the adjusted vertical position to allow for
-    additional content below.
-
-    Args:
-        pdf_canvas (Canvas): The ReportLab Canvas to draw on.
-        x (float): Starting x-coordinate for text placement.
-        y (float): Starting y-coordinate for the first line of text.
-        lines (list[str]): List of text lines to render.
-        centered (bool): Whether to horizontally center the text. Defaults to False.
-        line_height (float): Vertical space between lines in points.
-        font_size (float): Font size for all text lines.
-
-    Returns:
-        float: The y-coordinate after all lines are rendered, offset for spacing.
-    """
-    for i, line in enumerate(lines):
-        # We typically want the first line to be bolded
-        if i == 0:
-            pdf_canvas.setFont("Helvetica-Bold", font_size)
-        else:
-            pdf_canvas.setFont("Helvetica", font_size)
-
-        # If the text needs to be centered, we need to adjust x accordingly
-        x = (letter[0] - len(line) * (font_size / 2.25)) / 2 if centered else x
-        pdf_canvas.drawString(x, y, line)
-        y -= line_height
-
-    return pdf_canvas, y - line_height * 2  # Decrease y to start new paragraph
-
-
-def draw_table(
-    pdf_canvas: Canvas,
-    fig: plt.Figure,
-    x: float,
-    y: float,
-    text: list[str] = "",
-    font_size: float = 12.0,
-) -> tuple[Canvas, float]:
-    """Draw a rendered matplotlib table figure onto a PDF canvas.
-
-    This function exports a matplotlib figure as a high-DPI PNG image,
-    measures its true dimensions in points, and draws it centered onto the
-    PDF canvas. If the image would overflow the current page, a new page
-    is added. Optional header text is drawn above the image.
-
-    Args:
-        pdf_canvas (Canvas): The ReportLab Canvas to draw on.
-        fig (matplotlib.figure.Figure): A matplotlib figure, typically containing a table.
-        x (float): The starting x-coordinate for drawing (overridden for centering).
-        y (float): The current y-coordinate to begin drawing from.
-        text (list[str]): Optional header lines to draw above the table.
-        font_size (float): Font size for the header text.
-
-    Returns:
-        tuple[Canvas, float]: The canvas and the updated y-coordinate after drawing.
-    """
-    from io import BytesIO
-
-    from reportlab.lib.utils import ImageReader
-
-    # Render to a tightly‑cropped PNG in memory
-    dpi = fig.get_dpi()
-    buf = BytesIO()
-    fig.savefig(
-        buf,
-        format="png",
-        dpi=dpi,
-        bbox_inches="tight",
-        pad_inches=0,
-    )
-    buf.seek(0)
-
-    # Wrap it in an ImageReader so we can ask its true pixel size
-    img = ImageReader(buf)
-    pix_w, pix_h = img.getSize()  # pixels
-
-    # Compute its size in ReportLab points (1 pt = 1/72 inch)
-    #    since your PNG is written at `dpi` dots/inch:
-    width_pt = pix_w * 72.0 / dpi
-    height_pt = pix_h * 72.0 / dpi
-
-    # If you want to center horizontally on a letter‑width page:
-    page_w = letter[0]
-    x = (page_w - width_pt / 2) / 2
-
-    # Before drawing, we need to check that there's room to draw. if not,
-    # create a new page
-    needed_space = height_pt / 2 + len(text) * 14
-    if y - needed_space < 50:
-        pdf_canvas, y = draw_new_page(pdf_canvas)
-
-    pdf_canvas.setFont("Helvetica-Bold", font_size)
-    pdf_canvas, y = draw_text(pdf_canvas, x=50, y=y, lines=text)
-
-    # Adjust y for best visual appearance
-    # ReportLab’s `y` is the bottom of the image, so shift down by height
-    y = y - height_pt / 2
-    pdf_canvas.drawImage(
-        img,
-        x,
-        y,
-        width=width_pt / 1.5,
-        height=height_pt / 1.5,
-        mask="auto",
-    )
-
-    return pdf_canvas, y - 28
-
-
-def draw_new_page(
-    pdf_canvas: Canvas,
-) -> tuple[Canvas, float]:
-    """Add a new page to the PDF and reset the vertical position.
-
-    This function finalizes the current page on the canvas and starts a
-    new one. It resets the y-coordinate to a standard top margin for
-    continued drawing.
-
-    Args:
-        pdf_canvas (Canvas): The ReportLab Canvas to add a new page to.
-
-    Returns:
-        tuple[Canvas, float]: The updated canvas and new starting y-coordinate.
-    """
-    pdf_canvas.showPage()
-    y = letter[1] - 50
-    return pdf_canvas, y
 
 
 def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> dict[str, Any]:
