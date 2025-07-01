@@ -42,8 +42,8 @@ class BLS(BanffLesionScore):
         # Here's an example of how you could instantiate the other important attributes.
         # You will want to add an actual username and password as well as the actual
         # image ID you would get from Girder
-        self.gc = GirderClient(apiUrl="http://localhost:8080/api/v1")
-        self.gc.authenticate(username="admin", password="password")
-        self.results_folder = "67c9d3e77f87a3883fb5b43e"
-        self.image_id = "67dc170811ebeeb3121f9c23"
-        self.image_filepath = "images/542.svs"
+        # self.gc = GirderClient(apiUrl="http://localhost:8080/api/v1")
+        # self.gc.authenticate(username="admin", password="password")
+        # self.results_folder = "67c9d3e77f87a3883fb5b43e"
+        # self.image_id = "67dc170811ebeeb3121f9c23"
+        # self.image_filepath = "images/example.svs"
