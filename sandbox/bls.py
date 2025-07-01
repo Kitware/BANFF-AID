@@ -14,7 +14,7 @@ from girder_client import GirderClient
 class BLS(BanffLesionScore):
     def __init__(self) -> None:
         # I think we're just going to have to do this the longer way
-        annotations_directory = "annotations"
+        annotations_directory = "data/annotations"
         files = sorted(os.listdir(annotations_directory))
 
         # Arteries
