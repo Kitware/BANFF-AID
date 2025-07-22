@@ -88,8 +88,11 @@ class BanffLesionScore:
         self.image_filepath = args.image_filepath
 
         # Girder Client Instantiation
-        self.gc = GirderClient(apiUrl=args.girder_api_url)
-        self.gc.authenticate(args.username, args.password)
+        self.gc = GirderClient(apiUrl=args.girderApiUrl)
+        if args.girderToken is not None and args.girderToken != "":
+            self.gc.setToken(args.girderToken)
+        else:
+            self.gc.authenticate(args.username, args.password)
 
         # Annotations
         annotations = fetch_annotations(self.gc, args)
