@@ -17,13 +17,13 @@ BANFF-AID is a plugin for automated nephropathology diagnosis, built on the open
 
 2. **Build Docker Image:**
    ```bash
-   docker build -f banff-aid/Dockerfile -t BANFF-AID/banff-aid .
+   docker build -f banff_aid/Dockerfile -t dzenanz/banff-aid:latest .
    ```
 
 ### Integration with DSA
 
 1. Launch your local DSA instance.
-2. Import the `BANFF-AID/banff-aid:latest` Docker image via DSA:
+2. Import the `dzenanz/banff-aid:latest` Docker image via DSA:
    - Navigate to **Collections → Tasks → Slicer CLI Web Tasks**.
    - Select the CLI import option and import the Docker image.
 
