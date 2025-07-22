@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools && \
     rm -rf /root/.cache/pip/* && apt-get update && apt-get install -y gcc python3-dev git &&\
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR $MY_PLUGIN_PATH/banff-aid/cli
+WORKDIR $MY_PLUGIN_PATH/banff_aid/cli
 
 # Ensure your new CLI is recognized
 RUN python -m slicer_cli_web.cli_list_entrypoint --list_cli
