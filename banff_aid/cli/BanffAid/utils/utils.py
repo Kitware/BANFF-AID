@@ -476,8 +476,11 @@ def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> dict[str, An
     # The args.image_id is actually a file ID, not an item ID. The girder
     # client is expecting an item ID to retrieve annotations, which is what we
     # get here
-    image_info = gc.get(f"file/{args.image_id}")
-    item_id = image_info["itemId"]
+    try:
+        image_info = gc.get(f"file/{args.image_id}")
+        item_id = image_info["itemId"]
+    except Exception as e:
+        item_id = args.image_id
 
     # We use the item ID to get metadata for all annotations. This will give
     # us the annotation ID we need to get the actual coordinates
@@ -539,8 +542,11 @@ def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tup
         tuple[float, float]: The (x, y) microns-per-pixel values.
     """
     # We need to first get the tile information from the item ID
-    image_info = gc.get(f"file/{image_id}")
-    item_id = image_info["itemId"]
+    try:
+        image_info = gc.get(f"file/{args.image_id}")
+        item_id = image_info["itemId"]
+    except Exception as e:
+        item_id = args.image_id
     tile_info = gc.get(f"item/{item_id}/tiles")
 
     # If mm per pixel is not available, a default is set for an mpp of 0.25
