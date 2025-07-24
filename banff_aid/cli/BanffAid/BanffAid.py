@@ -1,7 +1,7 @@
 """BANFF-AID CLI entry point for computing Banff lesion scores from biopsy data.
 
 This script runs all Banff lesion score functions to generate a structured
-PDF report. The scoring functions rely on biopsy annotations for tubules,
+report document. The scoring functions rely on biopsy annotations for tubules,
 glomeruli, arteries, and interstitial regions, and return standardized
 numeric scores. These results help researchers and clinicians evaluate
 allograft status and monitor progression of chronic injury.
