@@ -96,6 +96,7 @@ class BanffLesionScore:
                       args.arteries_filename, "intimal_fibrosis"]
 
         # Girder Client Instantiation
+        self.batch = False
         self.gc = GirderClient(apiUrl=args.girderApiUrl)
         if args.girderToken is not None and args.girderToken != "":
             self.gc.setToken(args.girderToken)
@@ -104,7 +105,8 @@ class BanffLesionScore:
             self.gc.authenticate(args.username, args.password)
             annotations = fetch_annotations(self.gc, args)
         else:
-            print("Local batch mode detected. Not using Girder/DSA.")
+            # print("Local batch mode detected. Not using Girder/DSA.")
+            self.batch = True
             image_path = Path(self.image_filepath)
             xml_path = image_path.with_suffix(".xml")
             annotations = load_annotation(xml_path, self.names)
@@ -674,7 +676,7 @@ class BanffLesionScore:
         """
         # Generate the report and upload it to the output folder
         report_path = self.generate_report()
-        if batch:
+        if self.batch:
             destination = self.results_folder + "/" + str(Path(self.image_filepath).name) + "_report.docx"
             shutil.move(report_path, destination)
         else:

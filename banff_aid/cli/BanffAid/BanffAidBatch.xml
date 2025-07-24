@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>Quantification</category>
+  <title>BANFF-AID</title>
+  <description>Computes Banff lesion scores for a given directory of renal WSIs</description>
+  <version>0.0.1</version>
+  <documentation-url>https://digitalslidearchive.github.io/HistomicsTK/</documentation-url>
+  <license>Apache 2.0</license>
+  <contributor>Austin Allen (Kitware)</contributor>
+  <acknowledgements>This work is part of the BANFF-AID project.</acknowledgements>
+  <parameters>
+    <label>IO</label>
+    <description>Input/output parameters</description>
+    <directory defaultRelativePath="..">
+      <name>results_folder</name>
+      <label>Output Folder</label>
+      <description>Folder in which to save results</description>
+      <channel>input</channel>
+      <longflag>results-folder</longflag>
+    </directory>
+    <image>
+      <name>images_dir</name>
+      <label>Input Folder</label>
+      <description>Directory path for the images to be analyzed</description>
+      <channel>input</channel>
+      <longflag>images-dir</longflag>
+    </image>
+  </parameters>
+</executable>
