@@ -465,7 +465,7 @@ class BanffLesionScore:
             radius_adjusted = min(radius_adjusted, radius_intima)
 
             # Calculate the adjusted luminal area and compute the loss
-            area_lumen_adjusted = np.pi * radius_adjusted**2
+            area_lumen_adjusted = np.pi * radius_adjusted ** 2
             lumen_loss_percent = (area_intima - area_lumen_adjusted) / area_intima
             unadjusted_loss_percent = (area_intima - area_lumen) / area_intima
 
@@ -510,8 +510,8 @@ class BanffLesionScore:
             cv_continuous_weighted = round(cv_threshold(area_loss_weighted, False), 2)
 
             cv_summary = {
-                "Severest Luminal Area Loss (Max)": f"{round(area_loss_max, 3)*100}%",
-                "Severest Luminal Area Loss (Top Three Weighted Average)": f"{round(area_loss_weighted, 3)*100}%",
+                "Severest Luminal Area Loss (Max)": f"{round(area_loss_max, 3) * 100}%",
+                "Severest Luminal Area Loss (Top Three Weighted Average)": f"{round(area_loss_weighted, 3) * 100}%",
                 "Max 'cv' Score (Discrete)": cv_discrete_max,
                 "Max 'cv' Score (Continuous)": cv_continuous_max,
                 "Weighted Average 'cv' Score (Discrete)": cv_discrete_weighted,
@@ -532,7 +532,7 @@ class BanffLesionScore:
             cv_continuous_max = round(cv_threshold(area_loss, discrete=False), 2)
 
             cv_summary = {
-                "Severest Luminal Area Loss (Max)": f"{round(area_loss, 3)*100}%",
+                "Severest Luminal Area Loss (Max)": f"{round(area_loss, 3) * 100}%",
                 "Max 'cv' Score (Discrete)": cv_discrete_max,
                 "Max 'cv' Score (Continuous)": cv_continuous_max,
                 "Number of Arteries Evaluated": len(artery_summaries),

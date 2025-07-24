@@ -23,12 +23,12 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndi
+from PIL import Image, ImageDraw
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches
 from girder_client import GirderClient
 from matplotlib.figure import Figure
-from PIL import Image, ImageDraw
 from skimage.color import rgb2hsv
 from skimage.filters import gaussian
 from sklearn.neighbors import KDTree
@@ -67,10 +67,10 @@ def add_docx_figure(doc: Document, fig: Figure) -> Document:
 
 
 def add_docx_table(
-    doc: Document,
-    table_info: dict[str, Any],
-    table_title: str = "",
-    headers: list[str] = ["Item", "Value"],
+        doc: Document,
+        table_info: dict[str, Any],
+        table_title: str = "",
+        headers: list[str] = ["Item", "Value"],
 ) -> Document:
     """Adds a table to a python-docx Document using provided data.
 
@@ -386,12 +386,12 @@ def cortical_fibrotic_area(cortex: dict[str, Any], threshold: float) -> tuple[fl
 
 
 def create_histogram(
-    x: list[float],
-    title: str = None,
-    xlab: str = None,
-    ylab: str = None,
-    vline: float = None,
-    linelab: str = None,
+        x: list[float],
+        title: str = None,
+        xlab: str = None,
+        ylab: str = None,
+        vline: float = None,
+        linelab: str = None,
 ) -> Figure:
     """Create a matplotlib histogram with an optional vertical reference line.
 
@@ -875,7 +875,7 @@ def shrink_artery(artery: list[list[float]], media_width: float, xmin: float = 0
     for p in artery:
         x, y = p[0], p[1]
         dx, dy = x - cx, y - cy
-        length = np.sqrt(dx**2 + dy**2)
+        length = np.sqrt(dx ** 2 + dy ** 2)
         if length == 0:
             # In case a point is exactly at the centroid, do not move it
             adjusted_points.append([x, y])
@@ -924,13 +924,13 @@ def wilson_interval(k: int, n: int) -> tuple[float, float]:
     z = 1.96
 
     # Adjusted denominator.
-    denominator = 1 + (z**2 / n)
+    denominator = 1 + (z ** 2 / n)
 
     # Adjusted center.
-    center_adjusted = p_hat + (z**2 / (2 * n))
+    center_adjusted = p_hat + (z ** 2 / (2 * n))
 
     # The adjustment term.
-    adjustment = z * math.sqrt((p_hat * (1 - p_hat) / n) + (z**2 / (4 * n**2)))
+    adjustment = z * math.sqrt((p_hat * (1 - p_hat) / n) + (z ** 2 / (4 * n ** 2)))
 
     # Compute lower and upper bounds.
     lower_bound = (center_adjusted - adjustment) / denominator
@@ -966,10 +966,9 @@ def within_boundaries(element: dict, box: tuple) -> bool:
     element_y = [p[1] for p in element["points"]]
 
     return (
-        # This logic includes any polygon that overlaps at all with the cortical
-        # interstitium
-        max(element_x) > box[0]
-        and min(element_x) < box[1]
-        and max(element_y) > box[2]
-        and min(element_y) < box[3]
+        # This logic includes any polygon that overlaps at all with the cortical interstitium
+            max(element_x) > box[0]
+            and min(element_x) < box[1]
+            and max(element_y) > box[2]
+            and min(element_y) < box[3]
     )

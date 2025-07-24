@@ -11,8 +11,9 @@ Reference:
     the Banff Working Group publications and relevant nephropathology guidelines.
 """
 
-from banff_lesion_score.banff_lesion_score import BanffLesionScore
 from slicer_cli_web import CLIArgumentParser
+
+from banff_lesion_score.banff_lesion_score import BanffLesionScore
 
 
 def main() -> None:
