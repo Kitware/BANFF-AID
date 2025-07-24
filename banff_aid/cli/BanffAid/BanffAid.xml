@@ -110,7 +110,7 @@
       <longflag>password</longflag>
       <label>Password</label>
       <description>Password associated with your account</description>
-      <default>password</default>
+      <default></default>
     </string>
   </parameters>
 </executable>

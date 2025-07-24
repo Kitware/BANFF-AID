@@ -18,8 +18,10 @@ report for renal biopsy whole slide images.
 
 import io
 import math
-from typing import Any
+from pathlib import Path
+from typing import Any, List
 
+import lxml.etree as ET
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndi
@@ -33,6 +35,7 @@ from skimage.color import rgb2hsv
 from skimage.filters import gaussian
 from sklearn.neighbors import KDTree
 from slicer_cli_web import CLIArgumentParser
+from utils.xml_to_json import convert_xml_json
 
 
 def add_docx_figure(doc: Document, fig: Figure) -> Document:
@@ -523,6 +526,18 @@ def fetch_annotations(gc: GirderClient, args: CLIArgumentParser) -> dict[str, An
     return annotation_data
 
 
+def load_annotation(xml_path: Path, names: List[str]) -> dict[str, Any]:
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    annotations = convert_xml_json(root, names)
+
+    annotation_data: dict[str, dict] = {}
+    for ann in annotations:
+        annotation_data[ann["name"]] = {"annotation": ann}
+
+    return annotation_data
+
+
 def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tuple[float, float]:
     """Fetch microns-per-pixel (MPP) resolution from Girder metadata.
 
@@ -547,6 +562,29 @@ def fetch_mpp(gc: GirderClient, image_id: int, default_mpp: float = 0.25) -> tup
     mpp_x = tile_info.get("mm_x", default_mpp / 1000) * 1000
     mpp_y = tile_info.get("mm_y", default_mpp / 1000) * 1000
     return mpp_x, mpp_y
+
+
+def get_mpp(image_path: str, default_mpp: float = 0.25) -> tuple[float, float]:
+    """Get microns-per-pixel (MPP) from image metadata.
+
+    Use large_image to get MPP from the image metadata.
+    Args:
+        image_path (str): Path to the image file.
+        default_mpp (float): Default microns-per-pixel to use if not available.
+
+    Returns:
+        tuple[float, float]: The (x, y) microns-per-pixel values.
+    """
+    try:
+        import large_image
+        ts = large_image.getTileSource(image_path)
+        metadata = ts.getMetadata()
+        mpp_x = metadata["mm_x"] * 1000.0
+        mpp_y = metadata["mm_y"] * 1000.0
+        return mpp_x, mpp_y
+    except Exception as e:
+        print(f"Error reading MPP from image: {e}")
+        return default_mpp, default_mpp
 
 
 def get_boundaries(element: dict[str, Any]):

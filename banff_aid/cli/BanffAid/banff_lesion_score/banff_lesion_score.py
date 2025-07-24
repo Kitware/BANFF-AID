@@ -14,7 +14,9 @@ The BanffLesionScore class serves as the primary engine used in the BANFF-AID
 CLI plugin and can be run as a standalone report generator in HistomicsTK.
 """
 
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import large_image
@@ -36,7 +38,9 @@ from utils.utils import (
     fetch_annotations,
     fetch_mpp,
     get_boundaries,
+    get_mpp,
     k_nearest_polygons,
+    load_annotation,
     lumen_mask,
     shoelace_area,
     shortest_width,
@@ -87,15 +91,24 @@ class BanffLesionScore:
         self.image_id = args.image_id
         self.image_filepath = args.image_filepath
 
+        self.names = [args.cortical_interstitium_filename, args.medullary_interstitium_filename,
+                      args.non_gsg_filename, args.gsg_filename, args.tubules_filename,
+                      args.arteries_filename, "intimal_fibrosis"]
+
         # Girder Client Instantiation
         self.gc = GirderClient(apiUrl=args.girderApiUrl)
         if args.girderToken is not None and args.girderToken != "":
             self.gc.setToken(args.girderToken)
-        else:
+            annotations = fetch_annotations(self.gc, args)
+        elif args.password is not None and args.password != "":
             self.gc.authenticate(args.username, args.password)
+            annotations = fetch_annotations(self.gc, args)
+        else:
+            print("Local batch mode detected. Not using Girder/DSA.")
+            image_path = Path(self.image_filepath)
+            xml_path = image_path.with_suffix(".xml")
+            annotations = load_annotation(xml_path, self.names)
 
-        # Annotations
-        annotations = fetch_annotations(self.gc, args)
         self.non_gsg_annotation = annotations[args.non_gsg_filename]
         self.gsg_annotation = annotations[args.gsg_filename]
         self.tubules_annotation = annotations[args.tubules_filename]
@@ -244,7 +257,10 @@ class BanffLesionScore:
                 normal_q1 += shoelace_area(points)
 
         # We convert area units from pixels to microns
-        mpp_x, mpp_y = fetch_mpp(self.gc, self.image_id)
+        try:
+            mpp_x, mpp_y = fetch_mpp(self.gc, self.image_id)
+        except Exception as e:
+            mpp_x, mpp_y = get_mpp(self.image_filepath)
         normal_q1 = normal_q1 * mpp_x * mpp_y
         normal_q2 = normal_q2 * mpp_x * mpp_y
         normal_q3 = normal_q3 * mpp_x * mpp_y
@@ -307,7 +323,10 @@ class BanffLesionScore:
         """
         # First, we need the microns per pixel (x and y) so we can have
         # tubule diameters in microns
-        mpp_x, mpp_y = fetch_mpp(self.gc, self.image_id)
+        try:
+            mpp_x, mpp_y = fetch_mpp(self.gc, self.image_id)
+        except Exception as e:
+            mpp_x, mpp_y = get_mpp(self.image_filepath)
 
         # Now we calculate the diameter as the maximum
         tubule_elements = self.tubules_annotation["annotation"]["elements"]
@@ -643,7 +662,7 @@ class BanffLesionScore:
 
         return path
 
-    def main(self) -> None:
+    def main(self, batch: bool = False) -> None:
         """Run the full BANFF-AID pipeline and upload the PDF report to Girder.
 
         This method calls generate_report() to compute Banff lesion scores and
@@ -655,4 +674,8 @@ class BanffLesionScore:
         """
         # Generate the report and upload it to the output folder
         report_path = self.generate_report()
-        self.gc.uploadFileToFolder(self.results_folder, report_path)
+        if batch:
+            destination = self.results_folder + "/" + str(Path(self.image_filepath).name) + "_report.docx"
+            shutil.move(report_path, destination)
+        else:
+            self.gc.uploadFileToFolder(self.results_folder, report_path)
