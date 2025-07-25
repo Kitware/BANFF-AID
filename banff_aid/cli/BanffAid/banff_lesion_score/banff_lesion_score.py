@@ -349,16 +349,18 @@ class BanffLesionScore:
 
         # Estimate the proportion of tubular atrophy
         atrophied_tubules = np.sum(np.asarray(diameters) < normal_diameter * 0.5)
-        atrophy_proportion = atrophied_tubules / len(diameters)
-
-        # Calculate ct score
-        ct_score = 0
-        if 0 < atrophy_proportion <= 0.25:
-            ct_score = 1
-        elif 0.25 < atrophy_proportion <= 0.5:
-            ct_score = 2
+        if len(diameters) > 0:
+            atrophy_proportion = atrophied_tubules / len(diameters)
+            # Calculate ct score
+            if 0 < atrophy_proportion <= 0.25:
+                ct_score = 1
+            elif 0.25 < atrophy_proportion <= 0.5:
+                ct_score = 2
+            else:
+                ct_score = 3
         else:
-            ct_score = 3
+            atrophy_proportion = np.nan
+            ct_score = 0
 
         # Get the range and IQR for the diameters
         range = f"[{round(np.min(diameters), 1)}, {round(np.max(diameters), 1)}]"
@@ -491,8 +493,12 @@ class BanffLesionScore:
 
             # Calculate the adjusted luminal area and compute the loss
             area_lumen_adjusted = np.pi * radius_adjusted ** 2
-            lumen_loss_percent = (area_intima - area_lumen_adjusted) / area_intima
-            unadjusted_loss_percent = (area_intima - area_lumen) / area_intima
+            if area_intima > 0:
+                lumen_loss_percent = (area_intima - area_lumen_adjusted) / area_intima
+                unadjusted_loss_percent = (area_intima - area_lumen) / area_intima
+            else:
+                lumen_loss_percent = np.nan
+                unadjusted_loss_percent = np.nan
 
             artery_summaries.append(
                 {
@@ -566,7 +572,14 @@ class BanffLesionScore:
             return cv_summary
 
         else:
-            raise ValueError("No arteries detected. Not able to compute 'cv' score.")
+            cv_summary = {
+                "Severest Luminal Area Loss (Max)": f"{round(0.0, 3) * 100}%",
+                "Max 'cv' Score (Discrete)": np.nan,
+                "Max 'cv' Score (Continuous)": np.nan,
+                "Number of Arteries Evaluated": 0,
+            }
+
+            return cv_summary
 
     def compute_gs(self) -> dict[str, Any]:
         """Compute the glomerulosclerosis (gs) Banff lesion score.
@@ -586,12 +599,15 @@ class BanffLesionScore:
         n = count_ngsg + count_gsg
 
         # Compute proportion of GSG
-        gsg_proportion = count_gsg / n
+        if n > 0:
+            gsg_proportion = count_gsg / n
+            # Compute 95% confidence interval
+            lower_bound, upper_bound = wilson_interval(count_gsg, n)
+            confidence_interval = f"[{100 * round(lower_bound, 3)}, {100 * round(upper_bound, 3)}]"
+        else:
+            gsg_proportion = 0
+            confidence_interval = ""
         glomeruli_sclerosed_percentage = f"{100 * round(gsg_proportion, 3)}"
-
-        # Compute 95% confidence interval
-        lower_bound, upper_bound = wilson_interval(count_gsg, n)
-        confidence_interval = f"[{100 * round(lower_bound, 3)}, {100 * round(upper_bound, 3)}]"
 
         return {
             "Glomeruli Seen": n,
@@ -627,7 +643,10 @@ class BanffLesionScore:
 
         # Add figure of edge lengths between polygons
         edges = ci_results.pop("Edge Lengths", None)
-        med_val = np.median(edges)
+        if len(edges) > 0:
+            med_val = np.median(edges)
+        else:
+            med_val = 0
         fig = create_histogram(
             edges,
             "Distances Between Cortex Structures",
