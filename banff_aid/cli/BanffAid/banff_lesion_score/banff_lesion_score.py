@@ -21,6 +21,7 @@ from typing import Any
 
 import large_image
 import numpy as np
+import pandas as pd
 from PIL import Image, ImageDraw
 from docx import Document
 from girder_client import GirderClient
@@ -614,7 +615,7 @@ class BanffLesionScore:
             str: The file path of the generated PDF report.
         """
         # Prepare document with title and timestamp
-        path = "BANFF-AID Report.docx"
+        path = "BANFF-AID Report"
         doc = Document()
         timestamp = datetime.now().strftime("Report Timestamp: %Y-%m-%d %H:%M:%S")
         doc.add_heading("BANFF-AID", level=0)
@@ -663,7 +664,16 @@ class BanffLesionScore:
         doc.add_heading("Glomerulosclerosis")
         gs_results = self.compute_gs()
         doc = add_docx_table(doc, gs_results, table_title="Summary: Analysis of Glomeruli")
-        doc.save(path)
+        doc.save(path + ".docx")
+
+        # create table
+        results = ci_results["No Cutoff"]
+        results.update(cv_results)
+        results.update(gs_results)
+        image_path = Path(self.image_filepath)
+        df = pd.DataFrame(results, index=[str(image_path)])
+        df.index.name = "Image"
+        df.to_csv(path + ".csv")
 
         return path
 
@@ -680,7 +690,8 @@ class BanffLesionScore:
         # Generate the report and upload it to the output folder
         report_path = self.generate_report()
         if self.batch:
-            destination = self.results_folder + "/" + str(Path(self.image_filepath).name) + "_report.docx"
-            shutil.move(report_path, destination)
+            destination = self.results_folder + "/" + str(Path(self.image_filepath).name) + "_report"
+            shutil.move(report_path + ".docx", destination + ".docx")
+            shutil.move(report_path + ".csv", destination + ".csv")
         else:
-            self.gc.uploadFileToFolder(self.results_folder, report_path)
+            self.gc.uploadFileToFolder(self.results_folder, report_path + ".docx")
