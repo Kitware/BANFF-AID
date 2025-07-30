@@ -13,7 +13,7 @@ for renal biopsy analysis. It includes logic for:
 The BanffLesionScore class serves as the primary engine used in the BANFF-AID
 CLI plugin and can be run as a standalone report generator in HistomicsTK.
 """
-
+import argparse
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +25,12 @@ import pandas as pd
 from PIL import Image, ImageDraw
 from docx import Document
 from girder_client import GirderClient
+from scipy.ndimage.morphology import binary_fill_holes
+from skimage.color import rgb2hsv
+from skimage.filters import gaussian
+from skimage.morphology import binary_dilation
 from slicer_cli_web import CLIArgumentParser
+from utils.mask_to_xml import mask_to_xml
 from utils.utils import (
     add_docx_figure,
     add_docx_table,
@@ -49,6 +54,9 @@ from utils.utils import (
     wilson_interval,
     within_boundaries,
 )
+from utils.xml_to_json import convert_xml_json
+
+DOWNSAMPLE = 16  # for overall tissue segmentation
 
 
 class BanffLesionScore:
@@ -122,6 +130,44 @@ class BanffLesionScore:
         self.arteries_annotation = annotations[args.arteries_filename]
         self.cortical_interstitium_annotation = annotations[args.cortical_interstitium_filename]
         self.medullary_interstitium_annotation = annotations[args.medullary_interstitium_filename]
+
+        # cortical interstitium segmentation is an unreliable output of the neural network, compute it classically
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--min_size', dest='min_size', default=[30, 30, 30, 30, 30, 30, 30], type=int,
+                            help='min size region to be considered after prepass [in pixels]')
+        args = parser.parse_args([])
+        tissue = self.segment_tissue()
+        xml = mask_to_xml(tissue, args=args, classNum=7, downsample=DOWNSAMPLE, glob_offset=[0, 0])
+        json_ann = convert_xml_json(xml, self.names)
+        self.cortical_interstitium_annotation = {"annotation": json_ann[0]}
+
+    def segment_tissue(self) -> np.ndarray[2]:
+        """Segment the tissue region from the whole slide image using a saturation threshold."""
+        source = large_image.open(self.image_filepath)
+
+        width = int(source.sizeX / DOWNSAMPLE)
+        height = int(source.sizeY / DOWNSAMPLE)
+
+        region = {
+            "left": 0,
+            "top": 0,
+            "width": source.sizeX,
+            "height": source.sizeY,
+            "units": "base_pixels",
+        }
+        output = {'maxWidth': width, 'maxHeight': height}
+        result = source.getRegion(format=large_image.tilesource.TILE_FORMAT_NUMPY, region=region, output=output)
+        # getRegion returns a tuple, and the first element is in RGBA
+        thumbIm = result[0][:, :, :3]
+
+        # Segment the tissue using a saturation threshold
+        hsv = rgb2hsv(thumbIm)
+        g = gaussian(hsv[:, :, 1], 5)
+        binary = g > 0.05
+        binary = binary_fill_holes(binary)
+        binary = binary_dilation(binary).astype(np.uint8)
+
+        return binary
 
     def cortex_structures(self, boundary: tuple[float, float, float, float]) -> list[dict[str, Any]]:
         """Extract annotated structures overlapping a cortex region.
