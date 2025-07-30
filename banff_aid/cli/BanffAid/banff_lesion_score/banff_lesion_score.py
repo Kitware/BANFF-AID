@@ -631,7 +631,7 @@ class BanffLesionScore:
             str: The file path of the generated PDF report.
         """
         # Prepare document with title and timestamp
-        path = "BANFF-AID Report"
+        path = str(Path(self.image_filepath).name) + "_report"
         doc = Document()
         timestamp = datetime.now().strftime("Report Timestamp: %Y-%m-%d %H:%M:%S")
         doc.add_heading("BANFF-AID", level=0)
