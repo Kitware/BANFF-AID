@@ -88,8 +88,8 @@
       <name>girderApiUrl</name>
       <longflag>api-url</longflag>
       <label>Girder API URL</label>
-      <description>A Girder API URL (e.g., https://girder.example.com:443/api/v1)</description>
-      <default>http://banff-aid.com/api/v1</default>
+      <description>A Girder API URL (e.g., https://banff-aid.com/api/v1)</description>
+      <default></default>
     </string>
     <string>
       <name>girderToken</name>
