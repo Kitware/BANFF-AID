@@ -322,12 +322,9 @@ class BanffLesionScore:
         fibrosis_q3 = fibrosis_q3 * mpp_x * mpp_y
 
         # Compute proportions of fibrotic tissue
-        if normal_q1 > 0:
-            prop_q1 = fibrosis_q1 / normal_q1
-        else:
-            prop_q1 = 0
-        prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
-        prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
+        prop_q1 = fibrosis_q1 / normal_q1 if normal_q1 else 0
+        prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2) if (fibrosis_q2 + normal_q2) else 0
+        prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3) if (fibrosis_q3 + normal_q3) else 0
 
         ci_score = {
             "No Cutoff": {
@@ -735,10 +732,18 @@ class BanffLesionScore:
         doc = add_docx_table(doc, gs_results, table_title="Summary: Analysis of Glomeruli")
         doc.save(path + ".docx")
 
+        def add_prefix(dict, prefix: str) -> dict:
+            """Add a prefix to each key in the dictionary."""
+            return {f"{prefix}{k}": v for k, v in dict.items()}
+
         # create table
-        results = ci_results["No Cutoff"]
+        results = gs_results
         results.update(cv_results)
-        results.update(gs_results)
+
+        results.update(add_prefix(ci_results["No Cutoff"], "Q0."))
+        results.update(add_prefix(ci_results["Median"], "Q2."))
+        results.update(add_prefix(ci_results["Third Quartile"], "Q3."))
+
         image_path = Path(self.image_filepath)
         df = pd.DataFrame(results, index=[str(image_path)])
         df.index.name = "Image"
