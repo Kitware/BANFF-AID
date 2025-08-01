@@ -684,25 +684,19 @@ class BanffLesionScore:
         doc.add_heading("BANFF-AID", level=0)
         doc.add_heading(f"{timestamp}", level=1)
 
+        # Glomerulosclerosis
+        doc.add_heading("Glomerulosclerosis")
+        gs_results = self.compute_gs()
+        doc = add_docx_table(doc, gs_results, table_title="Summary: Analysis of Glomeruli")
+
+        # Vascular Intimal Thickening
+        doc.add_heading("Vascular Intimal Thickening")
+        cv_results = self.compute_cv()
+        doc = add_docx_table(doc, cv_results, table_title="Summary: Vascular Results")
+
         # Interstitial Fibrosis
         doc.add_heading("Interstitial Fibrosis")
         ci_results = self.compute_ci()
-
-        # Add figure of edge lengths between polygons
-        edges = ci_results.pop("Edge Lengths", None)
-        if len(edges) > 0:
-            med_val = np.median(edges)
-        else:
-            med_val = 0
-        fig = create_histogram(
-            edges,
-            "Distances Between Cortex Structures",
-            "Edge Distance",
-            "Count",
-            med_val,
-            "Median Value",
-        )
-        doc = add_docx_figure(doc, fig)
 
         # Add tables
         doc = add_docx_table(
@@ -721,15 +715,22 @@ class BanffLesionScore:
             table_title="Summary: Third Quartile Used as Cutoff for Fibrosis",
         )
 
-        # Vascular Intimal Thickening
-        doc.add_heading("Vascular Intimal Thickening")
-        cv_results = self.compute_cv()
-        doc = add_docx_table(doc, cv_results, table_title="Summary: Vascular Results")
+        # Add figure of edge lengths between polygons
+        edges = ci_results.pop("Edge Lengths", None)
+        if len(edges) > 0:
+            med_val = np.median(edges)
+        else:
+            med_val = 0
+        fig = create_histogram(
+            edges,
+            "Distances Between Cortex Structures",
+            "Edge Distance",
+            "Count",
+            med_val,
+            "Median Value",
+        )
+        doc = add_docx_figure(doc, fig)
 
-        # Glomerulosclerosis
-        doc.add_heading("Glomerulosclerosis")
-        gs_results = self.compute_gs()
-        doc = add_docx_table(doc, gs_results, table_title="Summary: Analysis of Glomeruli")
         doc.save(path + ".docx")
 
         def add_prefix(dict, prefix: str) -> dict:
