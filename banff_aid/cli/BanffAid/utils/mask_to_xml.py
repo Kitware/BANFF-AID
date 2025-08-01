@@ -64,7 +64,7 @@ def mask_to_xml(wsiMask, args, classNum, downsample, glob_offset):
 
     for value in np.unique(unique_mask)[1:]:
         # print output
-        print('\t mask_to_xml: annotationID ' + str(value))
+        # print('\t mask_to_xml: annotationID ' + str(value))
         # get only 1 class binary mask
         binary_mask = np.zeros(np.shape(wsiMask),dtype='uint8')
         binary_mask[wsiMask == value] = 1
