@@ -97,20 +97,24 @@ class BanffLesionScore:
                       args.arteries_filename, "intimal_fibrosis"]
 
         # Girder Client Instantiation
-        self.batch = False
-        self.gc = GirderClient(apiUrl=args.girderApiUrl)
-        if args.girderToken is not None and args.girderToken != "":
-            self.gc.setToken(args.girderToken)
-            annotations = fetch_annotations(self.gc, args)
-        elif args.password is not None and args.password != "":
-            self.gc.authenticate(args.username, args.password)
-            annotations = fetch_annotations(self.gc, args)
+        if args.girderApiUrl is not None and args.girderApiUrl != "":
+            self.batch = False
+            self.gc = GirderClient(apiUrl=args.girderApiUrl)
+            if args.girderToken is not None and args.girderToken != "":
+                self.gc.setToken(args.girderToken)
+                annotations = fetch_annotations(self.gc, args)
+            elif args.password is not None and args.password != "":
+                self.gc.authenticate(args.username, args.password)
+                annotations = fetch_annotations(self.gc, args)
+            else:
+                raise ValueError("Provide a valid girder token or username/password.")
         else:
             # print("Local batch mode detected. Not using Girder/DSA.")
             self.batch = True
             image_path = Path(self.image_filepath)
             xml_path = image_path.with_suffix(".xml")
             annotations = load_annotation(xml_path, self.names)
+            self.gc = GirderClient()  # some methods require a GirderClient instance
 
         self.non_gsg_annotation = annotations[args.non_gsg_filename]
         self.gsg_annotation = annotations[args.gsg_filename]
