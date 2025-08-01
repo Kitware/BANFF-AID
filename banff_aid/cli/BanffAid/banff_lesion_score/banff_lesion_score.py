@@ -278,8 +278,8 @@ class BanffLesionScore:
         # cutoff aligns best with clinical practice. We will use quantile 1, median and
         # quantile 3 for cutoffs
         q1 = 0
-        # q2 = np.quantile(pruned_edges, q=0.5)
-        # q3 = np.quantile(pruned_edges, q=0.75)
+        q2 = np.quantile(pruned_edges, q=0.5)
+        q3 = np.quantile(pruned_edges, q=0.75)
         normal_q1, normal_q2, normal_q3 = 0, 0, 0
         fibrosis_q1, fibrosis_q2, fibrosis_q3 = 0, 0, 0
 
@@ -289,15 +289,15 @@ class BanffLesionScore:
             normal_q1 += normal
             fibrosis_q1 += fibrosis
 
-            # # Compute areas by Q2 (median)
-            # normal, fibrosis = cortical_fibrotic_area(ctx_section, q2)
-            # normal_q2 += normal
-            # fibrosis_q2 += fibrosis
-            #
-            # # Compute areas by Q3
-            # normal, fibrosis = cortical_fibrotic_area(ctx_section, q3)
-            # normal_q3 += normal
-            # fibrosis_q3 += fibrosis
+            # Compute areas by Q2 (median)
+            normal, fibrosis = cortical_fibrotic_area(ctx_section, q2)
+            normal_q2 += normal
+            fibrosis_q2 += fibrosis
+
+            # Compute areas by Q3
+            normal, fibrosis = cortical_fibrotic_area(ctx_section, q3)
+            normal_q3 += normal
+            fibrosis_q3 += fibrosis
 
         # When computing fibrosis without a threshold, we're looking at total area of
         # the cortex (including structures), rather than area of interstitial area only.
@@ -326,8 +326,8 @@ class BanffLesionScore:
             prop_q1 = fibrosis_q1 / normal_q1
         else:
             prop_q1 = 0
-        # prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
-        # prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
+        prop_q2 = fibrosis_q2 / (fibrosis_q2 + normal_q2)
+        prop_q3 = fibrosis_q3 / (fibrosis_q3 + normal_q3)
 
         ci_score = {
             "No Cutoff": {
@@ -337,22 +337,22 @@ class BanffLesionScore:
                 "ci Score (Discrete)": ci_threshold(prop_q1, discrete=True),
                 "ci Score (Continuous)": round(ci_threshold(prop_q1, discrete=False), 3),
             },
-            # "Median": {
-            #     "Median Value": round(q2, 1),
-            #     "Normal Area": f"{round(normal_q2)} microns^2",
-            #     "Fibrosis Area": f"{round(fibrosis_q2)} microns^2",
-            #     "Proportion of Fibrosis": round(prop_q2, 3),
-            #     "ci Score (Discrete)": ci_threshold(prop_q2, discrete=True),
-            #     "ci Score (Continuous)": round(ci_threshold(prop_q2, discrete=False), 3),
-            # },
-            # "Third Quartile": {
-            #     "Third Quartile": round(q3, 1),
-            #     "Normal Area": f"{round(normal_q3)} microns^2",
-            #     "Fibrosis Area": f"{round(fibrosis_q3)} microns^2",
-            #     "Proportion of Fibrosis": round(prop_q3, 3),
-            #     "ci Score (Discrete)": ci_threshold(prop_q3, discrete=True),
-            #     "ci Score (Continuous)": round(ci_threshold(prop_q3, discrete=False), 3),
-            # },
+            "Median": {
+                "Median Value": round(q2, 1),
+                "Normal Area": f"{round(normal_q2)} microns^2",
+                "Fibrosis Area": f"{round(fibrosis_q2)} microns^2",
+                "Proportion of Fibrosis": round(prop_q2, 3),
+                "ci Score (Discrete)": ci_threshold(prop_q2, discrete=True),
+                "ci Score (Continuous)": round(ci_threshold(prop_q2, discrete=False), 3),
+            },
+            "Third Quartile": {
+                "Third Quartile": round(q3, 1),
+                "Normal Area": f"{round(normal_q3)} microns^2",
+                "Fibrosis Area": f"{round(fibrosis_q3)} microns^2",
+                "Proportion of Fibrosis": round(prop_q3, 3),
+                "ci Score (Discrete)": ci_threshold(prop_q3, discrete=True),
+                "ci Score (Continuous)": round(ci_threshold(prop_q3, discrete=False), 3),
+            },
             "Edge Lengths": pruned_edges,
         }
 
@@ -713,16 +713,16 @@ class BanffLesionScore:
             ci_results["No Cutoff"],
             table_title="Summary: No Cutoff Used for Analysis",
         )
-        # doc = add_docx_table(
-        #     doc,
-        #     ci_results["Median"],
-        #     table_title="Summary: Median Value Used as Cutoff for Fibrosis",
-        # )
-        # doc = add_docx_table(
-        #     doc,
-        #     ci_results["Third Quartile"],
-        #     table_title="Summary: Third Quartile Used as Cutoff for Fibrosis",
-        # )
+        doc = add_docx_table(
+            doc,
+            ci_results["Median"],
+            table_title="Summary: Median Value Used as Cutoff for Fibrosis",
+        )
+        doc = add_docx_table(
+            doc,
+            ci_results["Third Quartile"],
+            table_title="Summary: Third Quartile Used as Cutoff for Fibrosis",
+        )
 
         # Vascular Intimal Thickening
         doc.add_heading("Vascular Intimal Thickening")
