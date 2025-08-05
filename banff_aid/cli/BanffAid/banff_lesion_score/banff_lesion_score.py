@@ -14,16 +14,20 @@ The BanffLesionScore class serves as the primary engine used in the BANFF-AID
 CLI plugin and can be run as a standalone report generator in HistomicsTK.
 """
 import argparse
+import io
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import cv2
 import large_image
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import RGBColor
 from girder_client import GirderClient
 from scipy.ndimage.morphology import binary_fill_holes
 from skimage.color import rgb2hsv
@@ -513,7 +517,7 @@ class BanffLesionScore:
             except ValueError as e:
                 artery_centroid = compute_polygon_centroid(artery["points"])
                 artery_centroid = (int(artery_centroid[0]), int(artery_centroid[1]))
-                print(f"Warning: Failed to build luminal mask at {artery_centroid}: '{e}' Artery ignored.")
+                print(f"Failed to build luminal mask at {artery_centroid}: '{e}' Artery prediction ignored.")
 
                 continue
 
@@ -547,6 +551,29 @@ class BanffLesionScore:
                 lumen_loss_percent = np.nan
                 unadjusted_loss_percent = np.nan
 
+            # Create overlays of the artery segmentation used in computations
+            image = Image.fromarray(img_array)
+            draw = ImageDraw.Draw(image, mode="RGBA")
+            draw.polygon(adjusted_point, fill=(0, 0, 255, 32), outline=(0, 0, 255, 192))
+            draw.polygon(intima_points, fill=(0, 255, 255, 32), outline=(0, 255, 255, 192))
+            draw.polygon(lumen["perimeter"], fill=(0, 255, 0, 32), outline=(0, 255, 0, 192))
+
+            # limit the size of the image to 5 inches in either dimension
+            max_size_mm = 5 * 25.4 # 5 inches converted into in mm
+            mpp_x, mpp_y = get_mpp(self.image_filepath)
+            size_x = mpp_x * shape[1]
+            size_y = mpp_y * shape[0]
+            if size_x > max_size_mm or size_y > max_size_mm:
+                scale_factor = max(size_x / max_size_mm, size_y / max_size_mm)
+            else:
+                scale_factor = 1.0
+
+            # map 0.25 micrometers per pixel to 96 dots per inch
+            dpi_x = int(scale_factor * 24 / mpp_x)
+            dpi_y = int(scale_factor * 24 / mpp_y)
+            byte_stream = io.BytesIO()
+            image.save(byte_stream, format="PNG", dpi=(dpi_y, dpi_x))
+
             artery_summaries.append(
                 {
                     "Intimal Wall Ring Radius": radius_intima,
@@ -554,8 +581,10 @@ class BanffLesionScore:
                     "Luminal Radius (Adjusted)": radius_adjusted,
                     "Luminal Area Loss (Unadjusted)": unadjusted_loss_percent,
                     "Luminal Area Loss (Adjusted)": lumen_loss_percent,
+                    "Artery with Overlays": byte_stream,
                 }
             )
+
 
         # In Zhang et. all 2023, they described excluding small arteries to avoid unfair
         # comparisons. They then computed a weighted average of the 3 most severe arteries
@@ -567,10 +596,8 @@ class BanffLesionScore:
         # median value.
         if len(artery_summaries) > 2:
             median_size = np.median([a["Intimal Wall Ring Radius"] for a in artery_summaries])
-            acceptable_arteries = sorted(
-                [a for a in artery_summaries if a["Intimal Wall Ring Radius"] >= 0.5 * median_size],
-                key=lambda a: a["Luminal Area Loss (Adjusted)"],
-            )
+            sorted_arteries = sorted(artery_summaries, key=lambda a: a["Luminal Area Loss (Adjusted)"])
+            acceptable_arteries = [a for a in sorted_arteries if a["Intimal Wall Ring Radius"] >= 0.5 * median_size]
             top_three_arteries = acceptable_arteries[-3:]
             radius_sum = np.sum([a["Intimal Wall Ring Radius"] for a in top_three_arteries])
             area_loss_max = top_three_arteries[-1]["Luminal Area Loss (Adjusted)"]
@@ -597,7 +624,7 @@ class BanffLesionScore:
                 "Number of Arteries Evaluated": len(artery_summaries),
             }
 
-            return cv_summary
+            return cv_summary, [a["Artery with Overlays"] for a in sorted_arteries]
 
         elif len(artery_summaries) > 0:
             # If there are 1-2 arteries, we only look at the max
@@ -616,7 +643,7 @@ class BanffLesionScore:
                 "Number of Arteries Evaluated": len(artery_summaries),
             }
 
-            return cv_summary
+            return cv_summary, [a["Artery with Overlays"] for a in artery_summaries]
 
         else:
             cv_summary = {
@@ -626,7 +653,7 @@ class BanffLesionScore:
                 "Number of Arteries Evaluated": 0,
             }
 
-            return cv_summary
+            return cv_summary, [a["Artery with Overlays"] for a in artery_summaries]
 
     def compute_gs(self) -> dict[str, Any]:
         """Compute the glomerulosclerosis (gs) Banff lesion score.
@@ -691,7 +718,7 @@ class BanffLesionScore:
 
         # Vascular Intimal Thickening
         doc.add_heading("Vascular Intimal Thickening")
-        cv_results = self.compute_cv()
+        cv_results, arteries = self.compute_cv()
         doc = add_docx_table(doc, cv_results, table_title="Summary: Vascular Results")
 
         # Interstitial Fibrosis
@@ -730,6 +757,28 @@ class BanffLesionScore:
             "Median Value",
         )
         doc = add_docx_figure(doc, fig)
+
+        doc.add_heading("Arteries Analyzed")
+        paragraph = doc.add_paragraph()
+        run = paragraph.add_run("Overlay Legend")
+        run.add_break()
+        run = paragraph.add_run("Media: Blue")
+        run.font.color.rgb = RGBColor(0, 0, 255)
+        run.add_break()
+        run = paragraph.add_run("Intima: Cyan")
+        run.font.color.rgb = RGBColor(0, 255, 255)
+        run.add_break()
+        run = paragraph.add_run("Lumen: Green")
+        run.font.color.rgb = RGBColor(0, 255, 0)
+
+        for i, artery in enumerate(arteries):
+            # Add artery image to the document
+            paragraph = doc.add_paragraph()
+            run = paragraph.add_run()
+            run.add_text(f"Artery {i + 1}")
+            run.add_break()
+            run.add_picture(artery)
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
         doc.save(path + ".docx")
 
