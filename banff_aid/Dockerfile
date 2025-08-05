@@ -1,7 +1,7 @@
 # Start FROM the pre-built HistomicsTK image that includes
 # large_image, slicer_cli_web, etc.
 FROM dsarchive/histomicstk:latest
-LABEL maintainer="Austin Allen <austin.allen@kitware.com>"
+LABEL maintainer="Dženan Zukić <dzenan.zukic@kitware.com>"
 
 # Create a directory for your plugin code
 ENV MY_PLUGIN_PATH=/plugin
